@@ -103,6 +103,7 @@ async function main() {
       where: { chapterId_idx: { chapterId: ch.id, idx } },
       update: {
         title: c.name,
+        module: c.module,
         definition: c.definition,
         quote: c.quote,
         recast: c.reconstruct,
@@ -115,6 +116,7 @@ async function main() {
         chapterId: ch.id,
         idx,
         title: c.name,
+        module: c.module,
         definition: c.definition,
         quote: c.quote,
         recast: c.reconstruct,

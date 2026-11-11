@@ -14,15 +14,15 @@ export async function GET() {
     where: { userId, phase: 'NEW', dueAt: { lte: new Date() }, card: { status: 'APPROVED' } },
     orderBy: { dueAt: 'asc' },
     take: reviewDueCap(),
-    include: { card: { include: { chapter: { select: { title: true } } } } },
+    include: { card: true },
   })
 
   return NextResponse.json(
     due.map((d) => ({
       id: d.card.id,
-      module: d.card.chapter.title,
+      module: d.card.module,
       title: d.card.title,
-      subtitle: '',
+      subtitle: d.card.definition,
       quote: d.card.quote,
       source: d.card.source ?? '',
       recast: d.card.recast,

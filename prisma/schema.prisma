@@ -56,6 +56,7 @@ model Card {
   chapterId  String
   idx        Int        // 章节内顺序
   title      String     // 卡名（如「命由我作」）
+  module     String     @default("") // 技能分类（如「知命」「改过」，跨章节的能力主题）
   definition String     // 定义（一句话命题）
   quote      String     // 原文摘录
   recast     String     // 重构阐释（现代人话展开）

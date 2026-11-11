@@ -69,78 +69,50 @@ export async function resolveBook(userId: string) {
 }
 
 /**
- * 线性解锁：第 0 章恒解锁；第 k 章解锁 ⇔ 第 k-1 章全部卡片均已有 CardState
- * 返回：章 idx → 是否解锁 的数组，以及用户已学卡集合
- */
-export async function chapterUnlockMap(userId: string, bookId: string) {
-  const chapters = await prisma.chapter.findMany({
-    where: { bookId },
-    orderBy: { idx: 'asc' },
-    include: { cards: { select: { id: true } } },
-  })
-  const states = await prisma.cardState.findMany({
-    where: { userId, card: { chapter: { bookId } } },
-    select: { cardId: true },
-  })
-  const learned = new Set(states.map((s) => s.cardId))
-
-  const unlocked: number[] = []
-  for (const ch of chapters) {
-    const prev = chapters.find((c) => c.idx === ch.idx - 1)
-    const ok = ch.idx === 0 || (prev ? prev.cards.every((c) => learned.has(c.id)) : true)
-    if (ok) unlocked.push(ch.idx)
-    else break // 线性：一旦断档后面全部未解锁
-  }
-  return { chapters, learned, unlockedIdxs: unlocked }
-}
-
-/** 每日最少阅读张数（两章不足时向下补齐到此值） */
-export function dailyMinCards(): number {
-  return Number(process.env.DAILY_NEW_CARDS ?? 6)
-}
-
-/**
- * 今日阅读计划：从未读完的章节起，连续取两个章节；
- * 若两章卡片总数不足 dailyMinCards，继续向后补章直到达标（或书读完）。
- * 计划包含这些章节的全部已上架卡（含已学，用于前端展示勾/圈）。
+ * 今日阅读计划：每天固定 newCardsCap() 张（DAILY_NEW_CARDS）。
+ * 未学卡按章节顺序顺位取；今天已学的卡保留在计划里（前端展示勾），
+ * 学一张少一张待学、不后移，计划当天稳定。书余量不足时有多少取多少。
  */
 export async function todayPlan(userId: string, bookId: string) {
-  const { learned, unlockedIdxs } = await chapterUnlockMap(userId, bookId)
+  const cap = newCardsCap()
+  const dayStartAt = dayStart()
+  const [states, cards] = await Promise.all([
+    prisma.cardState.findMany({
+      where: { userId, card: { chapter: { bookId } } },
+      select: { cardId: true, createdAt: true },
+    }),
+    prisma.card.findMany({
+      where: { chapter: { bookId }, status: 'APPROVED' },
+      orderBy: [{ chapter: { idx: 'asc' } }, { idx: 'asc' }],
+      include: { chapter: { select: { title: true } } },
+    }),
+  ])
+  const learnedAt = new Map(states.map((s) => [s.cardId, s.createdAt]))
 
-  // 带完整卡信息查解锁章节
-  const full = await prisma.chapter.findMany({
-    where: { bookId, idx: { in: unlockedIdxs } },
-    orderBy: { idx: 'asc' },
-    include: {
-      cards: { where: { status: 'APPROVED' }, orderBy: { idx: 'asc' } },
-    },
-  })
+  const picked = cards
+    .filter((c) => {
+      const at = learnedAt.get(c.id)
+      return at === undefined || at >= dayStartAt // 旧日已学排除，今天学的保留
+    })
+    .slice(0, cap)
 
-  const picked: typeof full = []
-  let count = 0
-  for (const ch of full) {
-    const unlearnedInCh = ch.cards.filter((c) => !learned.has(c.id)).length
-    if (unlearnedInCh === 0) continue // 本章节已读完，跳过
-    picked.push(ch)
-    count += ch.cards.length
-    if (picked.length >= 2 && count >= dailyMinCards()) break
+  const cardsOut = picked.map((c) => ({
+    id: c.id,
+    module: c.module,
+    title: c.title,
+    subtitle: c.definition,
+    quote: c.quote,
+    source: c.source ?? '',
+    recast: c.recast,
+    trigger: c.trigger,
+    boundaries: c.boundaries.join('\n'),
+    learned: learnedAt.has(c.id),
+  }))
+  return {
+    cards: cardsOut,
+    target: cardsOut.length,
+    pickedChapters: [...new Set(picked.map((c) => c.chapter.title))],
   }
-
-  const cards = picked.flatMap((ch) =>
-    ch.cards.map((c) => ({
-      id: c.id,
-      module: ch.title,
-      title: c.title,
-      subtitle: '',
-      quote: c.quote,
-      source: c.source ?? '',
-      recast: c.recast,
-      trigger: c.trigger,
-      boundaries: c.boundaries.join('\n'),
-      learned: learned.has(c.id),
-    })),
-  )
-  return { cards, target: count, pickedChapters: picked.map((c) => c.title) }
 }
 
 /**
