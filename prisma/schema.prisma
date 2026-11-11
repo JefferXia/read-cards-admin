@@ -1,0 +1,148 @@
+// 一念·精读 —— 数据模型 v2
+// 产品交互（2026-11-11）：
+// 每日领取（打卡+困惑） → 今日知识卡列表（SQ3R 单卡） → 复习只做一遍（AI 10 分制打分，透出三档结论）
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  openId    String   @unique // wx.login 静默建号，v1 不打通任何旧系统
+  nickname  String?
+  createdAt DateTime @default(now())
+
+  cardStates   CardState[]
+  dailyClaims  DailyClaim[]
+  subscribeCredits SubscribeCredit?
+  pushLogs     PushLog[]
+}
+
+/// 书（v1 仅《幸福之路》一本，字段为将来多书留位）
+model Book {
+  id       String     @id @default(cuid())
+  slug     String     @unique
+  title    String
+  subtitle String? // 副题（如「命自我立」）
+  author   String
+  tagline  String? // 一句话推荐语（今日书单卡展示）
+  status   BookStatus @default(DRAFT)
+
+  chapters Chapter[]
+  claims   DailyClaim[]
+}
+
+/// 章（线性解锁：idx 递增）
+model Chapter {
+  id     String @id @default(cuid())
+  bookId String
+  idx    Int
+  title  String
+
+  book   Book    @relation(fields: [bookId], references: [id])
+  cards  Card[]
+
+  @@unique([bookId, idx])
+}
+
+/// 知识卡：SQ3R 结构 —— 卡名 / 定义 / 原文 / 重构 / 触发问句 / 边界
+model Card {
+  id         String     @id @default(cuid())
+  chapterId  String
+  idx        Int        // 章节内顺序
+  title      String     // 卡名（如「命由我作」）
+  definition String     // 定义（一句话命题）
+  quote      String     // 原文摘录
+  recast     String     // 重构阐释（现代人话展开）
+  trigger    String     // 触发问句（复习时用它提问，用户用自己的话复述）
+  /// 边界：适用条件 / 反例，防止过度泛化
+  boundaries String[]
+  /// 出处（篇章引用；公版书可引，版权书不露书名）
+  source     String?
+  status     CardStatus @default(DRAFT) // 仅 APPROVED 进入学习流
+
+  chapter    Chapter     @relation(fields: [chapterId], references: [id])
+  cardStates CardState[]
+
+  @@unique([chapterId, idx])
+  @@index([status])
+}
+
+/// 每用户每卡的学习状态（复习只做一遍：复习完成 phase=DONE 退出队列）
+model CardState {
+  id         String    @id @default(cuid())
+  userId     String
+  cardId     String
+  dueAt      DateTime // 首次复习到期时间（入册次日）
+  /// 复习结果：10 分制（AI 内部打分，页面不透出）
+  score      Int?
+  /// 三档结论：0 有点遗忘 / 1 记得一些 / 2 很巩固
+  tier       Int?
+  /// 完成复习时间
+  reviewedAt DateTime?
+  phase      CardPhase @default(NEW)
+  createdAt  DateTime  @default(now()) // 首次入册时间（每日新学额度的计数依据）
+
+  user    User @relation(fields: [userId], references: [id])
+  card    Card @relation(fields: [cardId], references: [id])
+
+  @@unique([userId, cardId])
+  @@index([userId, dueAt])
+}
+
+/// 每日领取（打卡）：一天一条，领取时可记录当下的困惑
+model DailyClaim {
+  id        String   @id @default(cuid())
+  userId    String
+  claimDate String // YYYY-MM-DD（服务器本地日期）
+  confusion String? // 领取时填写的困惑（选填）
+  bookId    String? // 领取时锁定的书目（书单连续性：前一本未读完则逐日续读）
+  createdAt DateTime @default(now())
+
+  user User  @relation(fields: [userId], references: [id])
+  book Book? @relation(fields: [bookId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, claimDate])
+}
+
+/// 订阅余额：一次性订阅限制的化解机制（结算页为唯一补给站）
+model SubscribeCredit {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  credits   Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+/// 推送审计
+model PushLog {
+  id     String   @id @default(cuid())
+  userId String
+  kind   String // REVIEW_DUE / ...
+  sentAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+enum BookStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum CardStatus {
+  DRAFT
+  APPROVED
+}
+
+enum CardPhase {
+  NEW // 已入册，待首次复习（到期后进入复习队列）
+  DONE // 已完成复习（一卡只复习一遍，退出队列）
+  SUSPENDED
+}
