@@ -46,3 +46,8 @@ export async function currentUserId(): Promise<string | null> {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } })
   return user?.id ?? null
 }
+
+/** 登录建号默认昵称：书友 + 4 位随机数（仅展示，不要求唯一） */
+export function randomNickname(): string {
+  return `书友${Math.floor(1000 + Math.random() * 9000)}`
+}

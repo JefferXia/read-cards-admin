@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { setSessionCookie } from '@/lib/auth'
+import { setSessionCookie, randomNickname } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 
@@ -14,7 +14,7 @@ export async function POST(req: Request) {
   const user = await prisma.user.upsert({
     where: { openId: openid },
     update: {},
-    create: { openId: openid, nickname: body.nickname ?? 'tester' },
+    create: { openId: openid, nickname: randomNickname() },
   })
   await setSessionCookie(user.id)
   return NextResponse.json({ ok: true, userId: user.id })

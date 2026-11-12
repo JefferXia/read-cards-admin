@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { code2Session } from '@/lib/wx'
-import { setSessionCookie } from '@/lib/auth'
+import { setSessionCookie, randomNickname } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 
@@ -21,8 +21,12 @@ export async function POST(req: Request) {
   const user = await prisma.user.upsert({
     where: { openId: session.openid },
     update: {},
-    create: { openId: session.openid },
+    create: { openId: session.openid, nickname: randomNickname() },
   })
+  // 存量用户昵称兜底（早期建号未写入昵称，下次登录补上）
+  if (!user.nickname) {
+    await prisma.user.update({ where: { id: user.id }, data: { nickname: randomNickname() } })
+  }
   await setSessionCookie(user.id)
   return NextResponse.json({ ok: true, userId: user.id })
 }

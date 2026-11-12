@@ -14,11 +14,13 @@ export async function GET() {
   const book = await resolveBook(userId)
   const plan = book ? await todayPlan(userId, book.id) : { target: 0, pickedChapters: [], cards: [] }
 
-  const [dueCount, learnedToday, credits, claim] = await Promise.all([
+  const [dueCount, learnedToday, credits, claim, meRow] = await Promise.all([
     prisma.cardState.count({ where: { userId, phase: 'NEW', dueAt: { lte: now } } }),
     prisma.cardState.count({ where: { userId, createdAt: { gte: dayStart(now) } } }),
     prisma.subscribeCredit.findUnique({ where: { userId } }),
     claimStats(userId),
+    // 昵称（「我的」页展示 + 微信昵称快捷填入）
+    prisma.user.findUnique({ where: { id: userId }, select: { nickname: true } }),
   ])
 
   let progress = { unlockedIdx: 0, totalChapters: 0, learnedCards: 0, totalCards: 0 }
@@ -48,6 +50,7 @@ export async function GET() {
   }
 
   return NextResponse.json({
+    nickname: meRow?.nickname ?? null,
     dueCount,
     study: {
       cap: plan.target, // 今日目标 = 固定 DAILY_NEW_CARDS 张（书尾不足则取余量）
