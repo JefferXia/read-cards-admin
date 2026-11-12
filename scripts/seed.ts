@@ -113,6 +113,7 @@ async function main() {
         status: 'APPROVED',
       },
       create: {
+        bookId: book.id, // 卡直属书（冗余自章节）
         chapterId: ch.id,
         idx,
         title: c.name,

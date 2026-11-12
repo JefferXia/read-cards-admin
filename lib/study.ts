@@ -39,7 +39,7 @@ export async function activeBook() {
 export async function bookHasRemaining(userId: string, bookId: string): Promise<boolean> {
   const remaining = await prisma.card.count({
     where: {
-      chapter: { bookId },
+      bookId,
       status: 'APPROVED',
       cardStates: { none: { userId } },
     },
@@ -78,12 +78,12 @@ export async function todayPlan(userId: string, bookId: string) {
   const dayStartAt = dayStart()
   const [states, cards] = await Promise.all([
     prisma.cardState.findMany({
-      where: { userId, card: { chapter: { bookId } } },
+      where: { userId, card: { bookId } },
       select: { cardId: true, createdAt: true },
     }),
     prisma.card.findMany({
-      where: { chapter: { bookId }, status: 'APPROVED' },
-      orderBy: [{ chapter: { idx: 'asc' } }, { idx: 'asc' }],
+      where: { bookId, status: 'APPROVED' },
+      orderBy: { sortOrder: 'asc' }, // 数据源 JSON 顺序（入库序），与章节无关
       include: { chapter: { select: { title: true } } },
     }),
   ])
@@ -111,8 +111,57 @@ export async function todayPlan(userId: string, bookId: string) {
   return {
     cards: cardsOut,
     target: cardsOut.length,
-    pickedChapters: [...new Set(picked.map((c) => c.chapter.title))],
+    pickedChapters: [
+      ...new Set(
+        picked
+          .map((c) => c.chapter?.title)
+          .filter((t): t is string => Boolean(t)), // 无章节卡（非公版书）不计章节
+      ),
+    ],
   }
+}
+
+/**
+ * 全书卡组（书本详情页）：本书全部 APPROVED 卡 + 已学标记。
+ * 每张卡带技能分类内的序号 no（模块内从 01 起，按章节顺序），模块按首次出现顺序返回。
+ */
+export async function bookDeck(userId: string, bookId: string) {
+  const [states, cards] = await Promise.all([
+    prisma.cardState.findMany({
+      where: { userId, card: { bookId } },
+      select: { cardId: true },
+    }),
+    prisma.card.findMany({
+      where: { bookId, status: 'APPROVED' },
+      orderBy: { sortOrder: 'asc' }, // 数据源 JSON 顺序（入库序），与章节无关
+    }),
+  ])
+  const learned = new Set(states.map((s) => s.cardId))
+
+  const counters = new Map<string, number>()
+  const modules: string[] = []
+  const cardsOut = cards.map((c) => {
+    if (!counters.has(c.module)) {
+      counters.set(c.module, 0)
+      modules.push(c.module)
+    }
+    const no = (counters.get(c.module) ?? 0) + 1
+    counters.set(c.module, no)
+    return {
+      id: c.id,
+      module: c.module,
+      no: String(no).padStart(2, '0'),
+      title: c.title,
+      subtitle: c.definition,
+      quote: c.quote,
+      source: c.source ?? '',
+      recast: c.recast,
+      trigger: c.trigger,
+      boundaries: c.boundaries.join('\n'),
+      learned: learned.has(c.id),
+    }
+  })
+  return { cards: cardsOut, modules, learnedCount: learned.size }
 }
 
 /**

@@ -23,20 +23,21 @@ export async function GET() {
 
   let progress = { unlockedIdx: 0, totalChapters: 0, learnedCards: 0, totalCards: 0 }
   if (book) {
-    const [chapters, states] = await Promise.all([
+    const [chapters, states, totalCards] = await Promise.all([
       prisma.chapter.findMany({
         where: { bookId: book.id },
         orderBy: { idx: 'asc' },
         include: { cards: { where: { status: 'APPROVED' }, select: { id: true } } },
       }),
       prisma.cardState.findMany({
-        where: { userId, card: { chapter: { bookId: book.id } } },
+        where: { userId, card: { bookId: book.id } },
         select: { cardId: true },
       }),
+      // 总卡数直接按书数（无章节卡的非公版书没有章可汇总）
+      prisma.card.count({ where: { bookId: book.id, status: 'APPROVED' } }),
     ])
     const learned = new Set(states.map((s) => s.cardId))
-    const totalCards = chapters.reduce((s, c) => s + c.cards.length, 0)
-    // 阅读位置 = 第一张未学卡所在章（全部读完则为最后一章）
+    // 阅读位置 = 第一张未学卡所在章（全部读完则为最后一章；无章节书为 0）
     const current = chapters.find((ch) => ch.cards.some((c) => !learned.has(c.id)))
     progress = {
       unlockedIdx: (current ?? chapters[chapters.length - 1])?.idx ?? 0,

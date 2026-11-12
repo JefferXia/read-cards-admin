@@ -34,6 +34,7 @@ model Book {
   status   BookStatus @default(DRAFT)
 
   chapters Chapter[]
+  cards    Card[] // 直属卡（无章节卡：非公版书不透出章节）
   claims   DailyClaim[]
 }
 
@@ -53,8 +54,15 @@ model Chapter {
 /// 知识卡：SQ3R 结构 —— 卡名 / 定义 / 原文 / 重构 / 触发问句 / 边界
 model Card {
   id         String     @id @default(cuid())
-  chapterId  String
-  idx        Int        // 章节内顺序
+  /// 直属书（有章节卡冗余存，无章节卡是唯一归属）
+  bookId     String
+  book       Book       @relation(fields: [bookId], references: [id])
+  /// 章节可空：非公版书卡片不绑定章节（归属只看 bookId）
+  chapterId  String?
+  idx        Int        // 章节内顺序（唯一键 / 管理台按章管理用，无章节卡恒为 0）
+  /// 全局展示顺序：入库递增序（数据源 JSON 顺序），与章节解耦
+  /// （后续非公版书不透出章节、部分卡可无章节，排序一律走本字段）
+  sortOrder  Int        @default(autoincrement())
   title      String     // 卡名（如「命由我作」）
   module     String     @default("") // 技能分类（如「知命」「改过」，跨章节的能力主题）
   definition String     // 定义（一句话命题）
@@ -67,11 +75,12 @@ model Card {
   source     String?
   status     CardStatus @default(DRAFT) // 仅 APPROVED 进入学习流
 
-  chapter    Chapter     @relation(fields: [chapterId], references: [id])
+  chapter    Chapter?    @relation(fields: [chapterId], references: [id])
   cardStates CardState[]
 
   @@unique([chapterId, idx])
   @@index([status])
+  @@index([bookId, sortOrder])
 }
 
 /// 每用户每卡的学习状态（复习只做一遍：复习完成 phase=DONE 退出队列）

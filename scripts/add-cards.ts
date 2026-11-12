@@ -120,6 +120,7 @@ async function main() {
     if (exists) continue
     await prisma.card.create({
       data: {
+        bookId: book.id, // 卡直属书（冗余自章节）
         chapterId: ch.id,
         idx: (last?.idx ?? 0) + 1,
         title: d.title,

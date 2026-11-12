@@ -27,6 +27,8 @@ import { useCallback, useEffect, useState } from 'react'
 interface AdminCard {
   id: string
   idx: number
+  sortOrder: number
+  module: string
   title: string
   definition: string
   quote: string
@@ -48,7 +50,9 @@ interface AdminBook {
   id: string
   title: string
   author: string
+  status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED'
   chapters: AdminChapter[]
+  cards: AdminCard[] // 直属卡（无章节的非公版书）
 }
 
 interface Stats {
@@ -62,6 +66,7 @@ interface Stats {
 const TIER_LABEL = ['有点遗忘', '记得一些', '很巩固']
 
 interface CardFormFields {
+  module: string
   title: string
   definition: string
   quote: string
@@ -73,6 +78,7 @@ interface CardFormFields {
 }
 
 interface CardFormData {
+  module: string
   title: string
   definition: string
   quote: string
@@ -119,7 +125,8 @@ export default function AdminConsole({ operator }: { operator: string }) {
 function CardsTab() {
   const [books, setBooks] = useState<AdminBook[]>([])
   const [editing, setEditing] = useState<AdminCard | null>(null)
-  const [creatingIn, setCreatingIn] = useState<{ chapterId: string; chapterTitle: string } | null>(null)
+  // 新卡挂载点：章节卡（chapterId）或直属卡（bookId），label 用于弹窗标题
+  const [creatingIn, setCreatingIn] = useState<{ label: string; chapterId?: string; bookId?: string } | null>(null)
 
   const reload = useCallback(() => {
     fetch('/api/admin/cards')
@@ -128,9 +135,11 @@ function CardsTab() {
   }, [])
   useEffect(reload, [reload])
 
-  const columns: ColumnsType<AdminCard> = [
-    { title: '#', dataIndex: 'idx', width: 56 },
+  // 章节卡序号用章节内 idx，直属卡用全局 sortOrder
+  const columns = (direct: boolean): ColumnsType<AdminCard> => [
+    { title: '#', dataIndex: direct ? 'sortOrder' : 'idx', width: 56 },
     { title: '卡名', dataIndex: 'title', width: 180 },
+    { title: '模块', dataIndex: 'module', width: 110, ellipsis: true },
     { title: '定义', dataIndex: 'definition', ellipsis: true },
     {
       title: '状态',
@@ -150,34 +159,84 @@ function CardsTab() {
     },
   ]
 
+  const cardTable = (direct: boolean, cards: AdminCard[]) => (
+    <Table rowKey="id" size="small" columns={columns(direct)} dataSource={cards} pagination={false} />
+  )
+
   return (
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       {books.map((b) => (
-        <Card key={b.id} title={`${b.title} · ${b.author}`} size="small">
+        <Card
+          key={b.id}
+          title={`${b.title} · ${b.author}`}
+          size="small"
+          extra={
+            <Select
+              size="small"
+              value={b.status}
+              style={{ width: 112 }}
+              onChange={(s) => {
+                fetch('/api/admin/books', {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ id: b.id, status: s }),
+                }).then(reload)
+              }}
+              options={[
+                { value: 'DRAFT', label: '草稿' },
+                { value: 'ACTIVE', label: '在学' },
+                { value: 'ARCHIVED', label: '已归档' },
+              ]}
+            />
+          }
+        >
           <Collapse
-            items={b.chapters.map((ch) => ({
-              key: ch.id,
-              label: `${ch.idx}. ${ch.title}`,
-              extra: (
-                <Button
-                  size="small"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setCreatingIn({ chapterId: ch.id, chapterTitle: ch.title })
-                  }}
-                >
-                  + 新卡
-                </Button>
-              ),
-              children: <Table rowKey="id" size="small" columns={columns} dataSource={ch.cards} pagination={false} />,
-            }))}
+            items={[
+              ...b.chapters.map((ch) => ({
+                key: ch.id,
+                label: `${ch.idx}. ${ch.title}`,
+                extra: (
+                  <Button
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setCreatingIn({ label: ch.title, chapterId: ch.id })
+                    }}
+                  >
+                    + 新卡
+                  </Button>
+                ),
+                children: cardTable(false, ch.cards),
+              })),
+              // 直属卡区：有直属卡的书显示；纯无章节书即使为空也显示，保证可建卡
+              ...(b.cards.length > 0 || b.chapters.length === 0
+                ? [
+                    {
+                      key: `${b.id}-direct`,
+                      label: '直属卡（无章节）',
+                      extra: (
+                        <Button
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setCreatingIn({ label: `${b.title}·直属卡`, bookId: b.id })
+                          }}
+                        >
+                          + 新卡
+                        </Button>
+                      ),
+                      children: cardTable(true, b.cards),
+                    },
+                  ]
+                : []),
+            ]}
           />
         </Card>
       ))}
 
       {editing && (
         <CardFormModal
-          title={`编辑卡 #${editing.idx}`}
+          title={`编辑卡 #${editing.sortOrder}`}
           initial={editing}
           onClose={() => setEditing(null)}
           onSubmit={async (data) => {
@@ -193,13 +252,16 @@ function CardsTab() {
       )}
       {creatingIn && (
         <CardFormModal
-          title={`新建卡（${creatingIn.chapterTitle}）`}
+          title={`新建卡（${creatingIn.label}）`}
           onClose={() => setCreatingIn(null)}
           onSubmit={async (data) => {
             await fetch('/api/admin/cards', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ chapterId: creatingIn.chapterId, ...data }),
+              body: JSON.stringify({
+                ...(creatingIn.chapterId ? { chapterId: creatingIn.chapterId } : { bookId: creatingIn.bookId }),
+                ...data,
+              }),
             })
             setCreatingIn(null)
             reload()
@@ -256,6 +318,7 @@ function CardFormModal({
         layout="vertical"
         initialValues={
           {
+            module: initial?.module ?? '',
             title: initial?.title ?? '',
             definition: initial?.definition ?? '',
             quote: initial?.quote ?? '',
@@ -267,6 +330,9 @@ function CardFormModal({
           } satisfies CardFormFields
         }
       >
+        <Form.Item name="module" label="模块（卡组名，如「觉察根源」，可空）">
+          <Input />
+        </Form.Item>
         <Form.Item name="title" label="卡名" rules={[{ required: true, message: '请输入卡名' }]}>
           <Input />
         </Form.Item>

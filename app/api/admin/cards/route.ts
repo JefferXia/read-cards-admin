@@ -21,18 +21,21 @@ export async function GET() {
         orderBy: { idx: 'asc' },
         include: { cards: { orderBy: { idx: 'asc' } } },
       },
+      cards: { where: { chapterId: null }, orderBy: { sortOrder: 'asc' } }, // 仅直属卡（无章节卡）
     },
   })
   return NextResponse.json({ books })
 }
 
-/** POST /api/admin/cards —— 新建卡片（草稿） */
+/** POST /api/admin/cards —— 新建卡片（草稿）；挂载点二选一：chapterId（章节卡）或 bookId（直属卡） */
 export async function POST(req: Request) {
   const denied = await guard()
   if (denied) return denied
 
   const body = (await req.json().catch(() => null)) as {
+    bookId?: string
     chapterId?: string
+    module?: string
     title?: string
     definition?: string
     quote?: string
@@ -41,19 +44,49 @@ export async function POST(req: Request) {
     boundaries?: string[]
     source?: string
   } | null
-  if (!body?.chapterId || !body.title?.trim() || !body.definition?.trim() || !body.trigger?.trim()) {
+  if (
+    !body ||
+    !(body.chapterId || body.bookId) ||
+    (body.chapterId && body.bookId) ||
+    !body.title?.trim() ||
+    !body.definition?.trim() ||
+    !body.trigger?.trim()
+  ) {
     return NextResponse.json({ error: 'bad_request' }, { status: 400 })
   }
 
-  const last = await prisma.card.findFirst({
-    where: { chapterId: body.chapterId },
-    orderBy: { idx: 'desc' },
-    select: { idx: true },
-  })
+  let bookId: string
+  let chapterId: string | null = null
+  let idx = 0 // 直属卡无章节内序（唯一键中 NULL 互不冲突）
+  if (body.chapterId) {
+    const chapter = await prisma.chapter.findUnique({
+      where: { id: body.chapterId },
+      select: { bookId: true },
+    })
+    if (!chapter) return NextResponse.json({ error: 'chapter_not_found' }, { status: 400 })
+    bookId = chapter.bookId
+    chapterId = body.chapterId
+    const last = await prisma.card.findFirst({
+      where: { chapterId: body.chapterId },
+      orderBy: { idx: 'desc' },
+      select: { idx: true },
+    })
+    idx = (last?.idx ?? 0) + 1
+  } else {
+    const book = await prisma.book.findUnique({
+      where: { id: body.bookId! },
+      select: { id: true },
+    })
+    if (!book) return NextResponse.json({ error: 'book_not_found' }, { status: 400 })
+    bookId = book.id
+  }
+
   const card = await prisma.card.create({
     data: {
-      chapterId: body.chapterId,
-      idx: (last?.idx ?? 0) + 1,
+      bookId, // 卡直属书（章节卡冗余自章节，直属卡为唯一归属）
+      chapterId,
+      idx,
+      module: body.module?.trim() ?? '',
       title: body.title.trim(),
       definition: body.definition.trim(),
       quote: body.quote?.trim() ?? '',
@@ -74,6 +107,7 @@ export async function PATCH(req: Request) {
 
   const body = (await req.json().catch(() => null)) as {
     id?: string
+    module?: string
     title?: string
     definition?: string
     quote?: string
@@ -86,6 +120,7 @@ export async function PATCH(req: Request) {
   if (!body?.id) return NextResponse.json({ error: 'bad_request' }, { status: 400 })
 
   const data: Record<string, unknown> = {}
+  if (body.module !== undefined) data.module = body.module.trim()
   if (body.title !== undefined) data.title = body.title.trim()
   if (body.definition !== undefined) data.definition = body.definition.trim()
   if (body.quote !== undefined) data.quote = body.quote.trim()

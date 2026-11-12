@@ -25,6 +25,7 @@ export interface BookPick {
 
 type CandidateWithCards = CandidateBook & {
   chapters: { cards: { title: string; definition: string }[] }[]
+  cards: { title: string; definition: string }[] // 直属卡（无章节卡的非公版书）
 }
 
 async function loadCandidates(): Promise<CandidateWithCards[]> {
@@ -40,6 +41,11 @@ async function loadCandidates(): Promise<CandidateWithCards[]> {
           },
         },
       },
+      cards: {
+        where: { chapterId: null, status: 'APPROVED' }, // 仅直属卡，避免与章节卡重复
+        orderBy: { sortOrder: 'asc' },
+        select: { title: true, definition: true },
+      },
     },
   })
 }
@@ -47,8 +53,7 @@ async function loadCandidates(): Promise<CandidateWithCards[]> {
 function pickMessages(confusion: string, books: CandidateWithCards[]): ChatMessage[] {
   const list = books
     .map((b) => {
-      const lines = b.chapters
-        .flatMap((ch) => ch.cards)
+      const lines = [...b.chapters.flatMap((ch) => ch.cards), ...b.cards]
         .map((c) => `- ${c.title}：${c.definition}`)
         .join('\n')
       return [
@@ -138,7 +143,9 @@ export async function pickBook(confusion: string): Promise<BookPick> {
         b.title,
         b.subtitle ?? '',
         b.tagline ?? '',
-        ...b.chapters.flatMap((ch) => ch.cards.map((c) => `${c.title}${c.definition}`)),
+        ...[...b.chapters.flatMap((ch) => ch.cards), ...b.cards].map(
+          (c) => `${c.title}${c.definition}`,
+        ),
       ]),
     }))
     .sort((x, y) => y.score - x.score)[0].book
