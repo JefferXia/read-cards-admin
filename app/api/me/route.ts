@@ -11,10 +11,9 @@ export async function GET() {
   if (!userId) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
   const now = new Date()
-  const book = await resolveBook(userId)
-  const plan = book ? await todayPlan(userId, book.id) : { target: 0, pickedChapters: [], cards: [] }
-
-  const [dueCount, learnedToday, credits, claim, meRow] = await Promise.all([
+  // 批1：与书目无关的查询全部与 resolveBook 并行（每省一步串行 = 省 1 次跨区 RTT）
+  const [book, dueCount, learnedToday, credits, claim, meRow] = await Promise.all([
+    resolveBook(userId),
     prisma.cardState.count({ where: { userId, phase: 'NEW', dueAt: { lte: now } } }),
     prisma.cardState.count({ where: { userId, createdAt: { gte: dayStart(now) } } }),
     prisma.subscribeCredit.findUnique({ where: { userId } }),
@@ -23,9 +22,12 @@ export async function GET() {
     prisma.user.findUnique({ where: { id: userId }, select: { nickname: true } }),
   ])
 
+  let plan: Awaited<ReturnType<typeof todayPlan>> = { target: 0, pickedChapters: [], cards: [] }
   let progress = { unlockedIdx: 0, totalChapters: 0, learnedCards: 0, totalCards: 0 }
   if (book) {
-    const [chapters, states, totalCards] = await Promise.all([
+    // 批2：依赖 book.id 的查询一次并行（todayPlan 内部 2 条 + 阅读进度 3 条）
+    const [plan2, chapters, states, totalCards] = await Promise.all([
+      todayPlan(userId, book.id),
       prisma.chapter.findMany({
         where: { bookId: book.id },
         orderBy: { idx: 'asc' },
@@ -38,6 +40,7 @@ export async function GET() {
       // 总卡数直接按书数（无章节卡的非公版书没有章可汇总）
       prisma.card.count({ where: { bookId: book.id, status: 'APPROVED' } }),
     ])
+    plan = plan2
     const learned = new Set(states.map((s) => s.cardId))
     // 阅读位置 = 第一张未学卡所在章（全部读完则为最后一章；无章节书为 0）
     const current = chapters.find((ch) => ch.cards.some((c) => !learned.has(c.id)))

@@ -22,19 +22,25 @@ export async function POST(req: Request) {
 
   const claimDate = dateKey()
   const book = await claimBook(userId, wantedBookId)
-  await prisma.dailyClaim.upsert({
-    where: { userId_claimDate: { userId, claimDate } },
-    update: { bookId: book?.id ?? null },
-    create: { userId, claimDate, confusion: confusion || null, bookId: book?.id ?? null },
-  })
+  // 两条写入互不依赖，并行落库（省 1 次串行 RTT）
+  const ops: Promise<unknown>[] = [
+    prisma.dailyClaim.upsert({
+      where: { userId_claimDate: { userId, claimDate } },
+      update: { bookId: book?.id ?? null },
+      create: { userId, claimDate, confusion: confusion || null, bookId: book?.id ?? null },
+    }),
+  ]
   if (book) {
     // 领取过的书才进书单（去重，重复领取只刷新时间）
-    await prisma.userBook.upsert({
-      where: { userId_bookId: { userId, bookId: book.id } },
-      update: {},
-      create: { userId, bookId: book.id },
-    })
+    ops.push(
+      prisma.userBook.upsert({
+        where: { userId_bookId: { userId, bookId: book.id } },
+        update: {},
+        create: { userId, bookId: book.id },
+      }),
+    )
   }
+  await Promise.all(ops)
 
   const claim = await claimStats(userId)
   return NextResponse.json({ ok: true, claimedToday: true, streakDays: claim.streakDays })

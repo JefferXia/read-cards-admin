@@ -10,15 +10,16 @@ export async function GET() {
   const userId = await currentUserId()
   if (!userId) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
-  const book = await resolveBook(userId)
-  if (!book) return NextResponse.json({ cards: [], target: 0, learnedToday: 0 })
-
-  const [plan, learnedToday, dueCount] = await Promise.all([
-    todayPlan(userId, book.id),
+  // 批1：到期/今日已学与书目无关，与 resolveBook 并行
+  const [book, learnedToday, dueCount] = await Promise.all([
+    resolveBook(userId),
     prisma.cardState.count({ where: { userId, createdAt: { gte: dayStart() } } }),
     // 到期复习数：卡列表页不再请求 /me，由本接口带回
     prisma.cardState.count({ where: { userId, phase: 'NEW', dueAt: { lte: new Date() } } }),
   ])
+  if (!book) return NextResponse.json({ cards: [], target: 0, learnedToday, dueCount })
+
+  const plan = await todayPlan(userId, book.id)
 
   return NextResponse.json({
     dueCount,

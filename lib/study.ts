@@ -1,4 +1,5 @@
 import { prisma } from './db'
+import type { Prisma } from '@prisma/client'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -31,8 +32,37 @@ export function initialDue(now = new Date()): Date {
   return new Date(now.getTime() + 20 * 60 * 60 * 1000)
 }
 
-export async function activeBook() {
-  return prisma.book.findFirst({ where: { status: 'ACTIVE' }, include: { chapters: true } })
+/** 带 chapters 的书目（缓存单元：书与章节只在导入/切换时变化，极低频） */
+export type BookWithChapters = Prisma.BookGetPayload<{ include: { chapters: true } }>
+
+/**
+ * 进程内书目缓存（TTL 60s）：书目几乎不变，而每条 SQL 跨区 RTT ~90ms——
+ * 活跃书/按 id 取书这类热点查询直接命中内存，省掉重复往返。
+ * 多实例部署时各实例独立过期；导入脚本改书后最多延迟 TTL 生效。
+ */
+const BOOK_CACHE_TTL = 60_000
+const bookCache = new Map<string, { at: number; book: BookWithChapters }>()
+
+async function cachedBook(key: string, load: () => Promise<BookWithChapters | null>) {
+  const hit = bookCache.get(key)
+  if (hit && Date.now() - hit.at < BOOK_CACHE_TTL) return hit.book
+  const book = await load()
+  if (book) bookCache.set(key, { at: Date.now(), book })
+  return book
+}
+
+/** 当前全局活跃书（进程内缓存 60s） */
+export function activeBook() {
+  return cachedBook('active', () =>
+    prisma.book.findFirst({ where: { status: 'ACTIVE' }, include: { chapters: true } }),
+  )
+}
+
+/** 按 id 取书（进程内缓存 60s）：换书校验等热点路径用 */
+export function getBookWithChapters(bookId: string) {
+  return cachedBook(bookId, () =>
+    prisma.book.findUnique({ where: { id: bookId }, include: { chapters: true } }),
+  )
 }
 
 /** 用户在某本书是否还有未学的 APPROVED 卡（决定是否续读该书） */
@@ -54,15 +84,16 @@ export async function bookHasRemaining(userId: string, bookId: string): Promise<
  * 2. 无领取记录 / 前一本已读完 → 当前全局活跃书。
  */
 export async function resolveBook(userId: string) {
+  // 一次 join 取回「最近领取 + 其书目」，省一条串行 RTT
+  // （bookId 非空的行 book 必非空：relation onDelete: SetNull 保证删除书时 bookId 同步置空）
   const last = await prisma.dailyClaim.findFirst({
     where: { userId, bookId: { not: null } },
     orderBy: [{ claimDate: 'desc' }, { createdAt: 'desc' }],
-    select: { bookId: true, claimDate: true },
+    include: { book: { include: { chapters: true } } },
   })
-  if (last?.bookId) {
-    const book = await prisma.book.findUnique({ where: { id: last.bookId }, include: { chapters: true } })
-    if (book && (last.claimDate === dateKey() || (await bookHasRemaining(userId, book.id)))) {
-      return book
+  if (last?.book) {
+    if (last.claimDate === dateKey() || (await bookHasRemaining(userId, last.book.id))) {
+      return last.book
     }
   }
   return activeBook()
@@ -75,7 +106,7 @@ export async function resolveBook(userId: string) {
  */
 export async function claimBook(userId: string, wantedBookId?: string) {
   if (wantedBookId) {
-    const book = await prisma.book.findUnique({ where: { id: wantedBookId }, include: { chapters: true } })
+    const book = await getBookWithChapters(wantedBookId) // 目录缓存命中则书目 0 RTT
     if (book && (await bookHasRemaining(userId, book.id))) return book
   }
   return resolveBook(userId)
