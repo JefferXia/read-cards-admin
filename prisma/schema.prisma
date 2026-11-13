@@ -20,6 +20,7 @@ model User {
   cardStates   CardState[]
   dailyClaims  DailyClaim[]
   userBooks    UserBook[]
+  userCards    UserCard[]
   subscribeCredits SubscribeCredit?
   pushLogs     PushLog[]
 }
@@ -136,6 +137,30 @@ model UserBook {
 
   @@unique([userId, bookId])
   @@index([userId, updatedAt])
+}
+
+/// 订阅余额：一次性订阅限制的化解机制（结算页为唯一补给站）
+/// 用户自建卡：拍照/粘贴片段 → 机器生成 → 自动入库；个人资产，可删除，不进全局学习流
+model UserCard {
+  id           String   @id @default(cuid())
+  userId       String
+  /// 来源片段的书名/作者（生成时的入参，如「道德经」/「老子」）
+  sourceTitle  String   @default("")
+  sourceAuthor String   @default("")
+  /// 自由打标：LLM 按内容归的类（2–4 字，如「道体」「处世」）
+  module       String   @default("")
+  title        String   // 卡名
+  definition   String   // 定义（一句话命题）
+  quote        String   // 原文摘录（引文回验通过才入库）
+  recast       String   // 重构阐释（与 Card.recast 同名对齐）
+  trigger      String   // 触发问句
+  boundaries   String[] // 边界：这不是什么 / 误用风险
+  source       String?  // 出处（原文中的篇章标注）
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }
 
 /// 订阅余额：一次性订阅限制的化解机制（结算页为唯一补给站）

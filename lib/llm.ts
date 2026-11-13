@@ -38,6 +38,8 @@ async function callOpenAiCompatible(
         model,
         messages,
         temperature: 0.7,
+        // 默认 4096 会被长 JSON 截断（parse 失败），显式提到模型上限 8192
+        max_tokens: 8192,
         response_format: { type: 'json_object' },
       }),
       signal: ctrl.signal,
