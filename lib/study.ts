@@ -48,7 +48,7 @@ export async function bookHasRemaining(userId: string, bookId: string): Promise<
 }
 
 /**
- * 用户今日应读的书（书单连续性，逐日链式传递）：
+ * 用户今日应读的书（默认书单，书单连续性，逐日链式传递）：
  * 1. 最近一次领取的书：今天领的直接用；非今天的，若该书还有未学卡则续读
  *    （运营切换全局活跃书不影响在读用户，读完前一本才进新书）。
  * 2. 无领取记录 / 前一本已读完 → 当前全局活跃书。
@@ -66,6 +66,19 @@ export async function resolveBook(userId: string) {
     }
   }
   return activeBook()
+}
+
+/**
+ * 领取时锁定的今日书目：请求明确带 bookId（刷新书单选中的书）且该书还有未学卡
+ * 就切到它——换书以「领取」为确认动作，领取后记入书单表（UserBook，去重）；
+ * 没带 / 书不存在 / 已读完，都回落默认书单 resolveBook（claim 链，未读完续读）。
+ */
+export async function claimBook(userId: string, wantedBookId?: string) {
+  if (wantedBookId) {
+    const book = await prisma.book.findUnique({ where: { id: wantedBookId }, include: { chapters: true } })
+    if (book && (await bookHasRemaining(userId, book.id))) return book
+  }
+  return resolveBook(userId)
 }
 
 /**

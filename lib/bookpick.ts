@@ -29,7 +29,9 @@ type CandidateWithCards = CandidateBook & {
 }
 
 async function loadCandidates(): Promise<CandidateWithCards[]> {
+  // 至少有一张上架（APPROVED）卡的书才可推荐：没卡的推荐了也领不到卡
   return prisma.book.findMany({
+    where: { cards: { some: { status: 'APPROVED' } } },
     include: {
       chapters: {
         orderBy: { idx: 'asc' },
@@ -105,20 +107,22 @@ function fallbackReason(book: CandidateBook): string {
   return `先从《${book.title}》读起，它和你的困惑离得最近。`
 }
 
+function toCandidateBook(b: CandidateWithCards): CandidateBook {
+  return {
+    id: b.id,
+    title: b.title,
+    subtitle: b.subtitle,
+    author: b.author,
+    tagline: b.tagline,
+  }
+}
+
 /**
  * 按困惑选书。无在架书时 book=null；LLM 路径任何失败都落到本地启发式。
  */
 export async function pickBook(confusion: string): Promise<BookPick> {
   const candidates = await loadCandidates()
   if (candidates.length === 0) return { book: null, reason: '' }
-
-  const slim = (b: CandidateWithCards): CandidateBook => ({
-    id: b.id,
-    title: b.title,
-    subtitle: b.subtitle,
-    author: b.author,
-    tagline: b.tagline,
-  })
 
   if (llmProvider() !== 'mock') {
     try {
@@ -129,7 +133,7 @@ export async function pickBook(confusion: string): Promise<BookPick> {
         const reason = String(parsed?.reason ?? '')
           .trim()
           .slice(0, 60)
-        return { book: slim(hit), reason: reason || fallbackReason(hit) }
+        return { book: toCandidateBook(hit), reason: reason || fallbackReason(hit) }
       }
     } catch {
       // 网络 / 解析失败：落到本地启发式
@@ -149,5 +153,27 @@ export async function pickBook(confusion: string): Promise<BookPick> {
       ]),
     }))
     .sort((x, y) => y.score - x.score)[0].book
-  return { book: slim(best), reason: fallbackReason(best) }
+  return { book: toCandidateBook(best), reason: fallbackReason(best) }
+}
+
+/**
+ * 困惑为空 → 随机换一本上架书（尽量避开 excludeId 对应的当前书），
+ * 推荐理由走通用话术，不经过 LLM。
+ */
+export async function pickRandomBook(excludeId?: string): Promise<BookPick> {
+  const candidates = await loadCandidates()
+  const pool = candidates.filter((b) => b.id !== excludeId)
+  const list = pool.length > 0 ? pool : candidates
+  if (list.length === 0) return { book: null, reason: '' }
+
+  const hit = list[Math.floor(Math.random() * list.length)]
+  const reasons = [
+    `随手换一本，这次是《${hit.title}》。`,
+    `换换口味，就它了——《${hit.title}》。`,
+    `盲盒开到《${hit.title}》，看看能不能接住今天的你。`,
+  ]
+  return {
+    book: toCandidateBook(hit),
+    reason: reasons[Math.floor(Math.random() * reasons.length)],
+  }
 }

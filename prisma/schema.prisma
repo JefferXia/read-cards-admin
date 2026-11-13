@@ -19,6 +19,7 @@ model User {
 
   cardStates   CardState[]
   dailyClaims  DailyClaim[]
+  userBooks    UserBook[]
   subscribeCredits SubscribeCredit?
   pushLogs     PushLog[]
 }
@@ -36,6 +37,7 @@ model Book {
   chapters Chapter[]
   cards    Card[] // 直属卡（无章节卡：非公版书不透出章节）
   claims   DailyClaim[]
+  userBooks UserBook[]
 }
 
 /// 章（线性解锁：idx 递增）
@@ -118,6 +120,22 @@ model DailyClaim {
   book Book? @relation(fields: [bookId], references: [id], onDelete: SetNull)
 
   @@unique([userId, claimDate])
+}
+
+/// 书单表：用户领取过的书（领取打卡时写入/刷新一条，去重；只刷新书单未领取不记）。
+/// 按最近领取时间排序，天然形成「我的书单」列表。
+model UserBook {
+  id        String   @id @default(cuid())
+  userId    String
+  bookId    String
+  createdAt DateTime @default(now()) // 首次领取入书单
+  updatedAt DateTime @updatedAt // 最近领取时间（排序依据）
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  book Book @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bookId])
+  @@index([userId, updatedAt])
 }
 
 /// 订阅余额：一次性订阅限制的化解机制（结算页为唯一补给站）
