@@ -12,7 +12,7 @@ export async function GET() {
 
   const now = new Date()
   // 批1：与书目无关的查询全部与 resolveBook 并行（每省一步串行 = 省 1 次跨区 RTT）
-  const [book, dueCount, learnedToday, learnedAll, credits, claim, meRow] = await Promise.all([
+  const [book, dueCount, learnedToday, learnedAll, masteredCount, credits, claim, meRow] = await Promise.all([
     resolveBook(userId),
     // 到期数含首次到期（NEW）与复习过再次到期（DONE）；MASTERED 不计
     prisma.cardState.count({
@@ -21,6 +21,8 @@ export async function GET() {
     prisma.cardState.count({ where: { userId, createdAt: { gte: dayStart(now) } } }),
     // 累计已读：跨书全量统计（换书不丢历史；progress.learnedCards 原按当前书算会重置）
     prisma.cardState.count({ where: { userId } }),
+    // 成功记忆：毕业卡数（两次「很巩固」，已退出复习队列）
+    prisma.cardState.count({ where: { userId, phase: 'MASTERED' } }),
     prisma.subscribeCredit.findUnique({ where: { userId } }),
     claimStats(userId),
     // 昵称（「我的」页展示 + 微信昵称快捷填入）
@@ -29,7 +31,7 @@ export async function GET() {
 
   let plan: Awaited<ReturnType<typeof todayPlan>> = { target: 0, pickedChapters: [], cards: [] }
   // 无活跃书时也要透出真实的跨书累计（其余进度字段保持 0）
-  let progress = { unlockedIdx: 0, totalChapters: 0, learnedCards: learnedAll, totalCards: 0 }
+  let progress = { unlockedIdx: 0, totalChapters: 0, learnedCards: learnedAll, masteredCards: masteredCount, totalCards: 0 }
   if (book) {
     // 批2：依赖 book.id 的查询一次并行（todayPlan 内部 2 条 + 阅读进度 3 条）
     const [plan2, chapters, states, totalCards] = await Promise.all([
@@ -54,6 +56,7 @@ export async function GET() {
       unlockedIdx: (current ?? chapters[chapters.length - 1])?.idx ?? 0,
       totalChapters: chapters.length,
       learnedCards: learnedAll, // 累计已读 = 全部书（跨书累计，不随换书重置）
+      masteredCards: masteredCount, // 成功记忆 = 毕业卡数（跨书累计）
       totalCards,
     }
   }

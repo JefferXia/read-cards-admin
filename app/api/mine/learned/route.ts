@@ -24,8 +24,9 @@ interface LearnedCardOut {
 }
 
 /**
- * GET /api/mine/learned —— 个人主页：学过的知识卡
+ * GET /api/mine/learned —— 个人主页：在温习的卡（学过但未毕业）
  * 以书名聚合（首次学卡时间正序），书内按学习时间正序；
+ * 毕业卡（MASTERED，两次「很巩固」）不在本接口返回 —— 它们计入 /api/me 的成功记忆。
  * tier 0/1/2 = 三种温习结论，null = 未温习（前端浅灰卡）。
  */
 export async function GET() {
@@ -33,8 +34,9 @@ export async function GET() {
   if (!userId) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
   const states = await prisma.cardState.findMany({
-    // 学过的知识卡 = 全局卡的学习轨迹（自建认知卡走「我的卡片」卡包，不进本页）
-    where: { userId, cardId: { not: null } },
+    // 学过的知识卡 = 全局卡的学习轨迹（自建认知卡走「我的卡片」卡包，不进本页）；
+    // 只出在温习的卡：毕业（MASTERED）已退出复习队列，不再列出
+    where: { userId, cardId: { not: null }, phase: { not: 'MASTERED' } },
     orderBy: { createdAt: 'asc' },
     select: {
       cardId: true,
