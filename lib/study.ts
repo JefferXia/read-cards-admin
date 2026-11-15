@@ -32,6 +32,36 @@ export function initialDue(now = new Date()): Date {
   return new Date(now.getTime() + 20 * 60 * 60 * 1000)
 }
 
+/** 复习间隔阶梯（天）：1 → 3 → 7 → 14 → 30（封顶） */
+export const INTERVAL_LADDER = [1, 3, 7, 14, 30]
+
+/**
+ * 自适应复习排程：按三档结论重排下次到期时间。
+ * - tier 1/2 都正常推进阶梯（1→3→7→14→30 天，封顶 30）
+ * - tier 0 有点遗忘：阶梯归零，回起点（1 天后再见）
+ * - 毕业不看间隔，累计两次「很巩固」（tier2Count ≥ 2）即 MASTERED
+ */
+export function scheduleReview(
+  tier: 0 | 1 | 2,
+  state: { reps: number; tier2Count: number },
+  now = new Date(),
+) {
+  const tier2Count = tier === 2 ? state.tier2Count + 1 : state.tier2Count
+  if (tier2Count >= 2) {
+    // 毕业：退出复习队列（dueAt 不再使用，落当前时间）
+    return { phase: 'MASTERED' as const, reps: state.reps, tier2Count, intervalDays: null, dueAt: now }
+  }
+  const reps = tier === 0 ? 0 : state.reps + 1
+  const intervalDays = INTERVAL_LADDER[Math.max(Math.min(reps - 1, INTERVAL_LADDER.length - 1), 0)]
+  return {
+    phase: 'DONE' as const,
+    reps,
+    tier2Count,
+    intervalDays,
+    dueAt: new Date(now.getTime() + intervalDays * DAY_MS),
+  }
+}
+
 /** 带 chapters 的书目（缓存单元：书与章节只在导入/切换时变化，极低频） */
 export type BookWithChapters = Prisma.BookGetPayload<{ include: { chapters: true } }>
 

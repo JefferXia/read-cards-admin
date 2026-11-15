@@ -2,16 +2,18 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { currentUserId } from '@/lib/auth'
 import { judgeAnswer } from '@/lib/judge'
+import { scheduleReview } from '@/lib/study'
 
 export const runtime = 'nodejs'
 
 const TIER_SCORE = [3, 6, 9] // 档位兜底分（无复述文本时）
 
 /**
- * POST /api/review/done { cardId, answer?, tier? } —— 完成一张卡的复习（只做一遍）
+ * POST /api/review/done { cardId, answer?, tier? } —— 完成一张卡的复习（自适应排程）
  * - 有 answer：AI 按 10 分制判分 → 三档结论（页面只透出 tier）
  * - 无 answer（前端已定档）：直接落 tier
- * 完成后 phase=DONE，退出复习队列。
+ * 按 tier 重排下次到期（1→3→7→14→30 天阶梯，遗忘归零）；
+ * 累计两次「很巩固」毕业（phase=MASTERED，退出队列）。
  */
 export async function POST(req: Request) {
   const userId = await currentUserId()
@@ -32,14 +34,19 @@ export async function POST(req: Request) {
   })
   if (!state) return NextResponse.json({ error: 'state_not_found' }, { status: 404 })
 
-  // 幂等：已复习过直接返回原结果
-  if (state.phase === 'DONE') {
+  // 幂等：已毕业直接返回
+  if (state.phase === 'MASTERED') {
+    return NextResponse.json({ ok: true, already: true, score: state.score, tier: state.tier, feedback: '', graduated: true })
+  }
+  // 防连点：未到期的卡（刚复习过、dueAt 在未来）不重复计复习
+  if (state.phase === 'DONE' && state.dueAt > new Date()) {
     return NextResponse.json({
       ok: true,
       already: true,
       score: state.score,
       tier: state.tier,
       feedback: '',
+      graduated: false,
     })
   }
 
@@ -65,10 +72,26 @@ export async function POST(req: Request) {
     score = TIER_SCORE[tier]
   }
 
+  const next = scheduleReview(tier, { reps: state.reps, tier2Count: state.tier2Count })
   await prisma.cardState.update({
     where: { id: state.id },
-    data: { score, tier, reviewedAt: new Date(), phase: 'DONE' },
+    data: {
+      score,
+      tier,
+      reviewedAt: new Date(),
+      phase: next.phase,
+      reps: next.reps,
+      tier2Count: next.tier2Count,
+      dueAt: next.dueAt,
+    },
   })
 
-  return NextResponse.json({ ok: true, score, tier, feedback })
+  return NextResponse.json({
+    ok: true,
+    score,
+    tier,
+    feedback,
+    graduated: next.phase === 'MASTERED',
+    nextDays: next.intervalDays,
+  })
 }

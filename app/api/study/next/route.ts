@@ -14,8 +14,10 @@ export async function GET() {
   const [book, learnedToday, dueCount] = await Promise.all([
     resolveBook(userId),
     prisma.cardState.count({ where: { userId, createdAt: { gte: dayStart() } } }),
-    // 到期复习数：卡列表页不再请求 /me，由本接口带回
-    prisma.cardState.count({ where: { userId, phase: 'NEW', dueAt: { lte: new Date() } } }),
+    // 到期复习数：卡列表页不再请求 /me，由本接口带回（含再次到期的 DONE 卡）
+    prisma.cardState.count({
+      where: { userId, phase: { in: ['NEW', 'DONE'] }, dueAt: { lte: new Date() } },
+    }),
   ])
   if (!book) return NextResponse.json({ cards: [], target: 0, learnedToday, dueCount })
 
