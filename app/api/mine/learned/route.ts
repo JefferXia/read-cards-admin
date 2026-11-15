@@ -19,6 +19,8 @@ interface LearnedCardOut {
   learned: boolean
   /** 学卡时间（ISO，即卡片入册时间） */
   learnedAt: string
+  /** 下次记忆时间（ISO，当前排程的到期时间） */
+  nextAt: string
   /** 记忆进度 0–100（打分 + 复习轮数 + 巩固次数综合） */
   progress: number
 }
@@ -54,6 +56,7 @@ export async function GET() {
       reps: true,
       tier2Count: true,
       createdAt: true,
+      dueAt: true,
       card: {
         select: {
           module: true,
@@ -95,6 +98,7 @@ export async function GET() {
         boundaries: s.card.boundaries.join('\n'),
         learned: true,
         learnedAt: s.createdAt.toISOString(),
+        nextAt: s.dueAt.toISOString(),
         progress: memoryProgress(s),
       })
     } else if (s.userCard) {
@@ -120,6 +124,7 @@ export async function GET() {
         boundaries: '',
         learned: true,
         learnedAt: s.createdAt.toISOString(),
+        nextAt: s.dueAt.toISOString(),
         progress: memoryProgress(s),
       })
     }
