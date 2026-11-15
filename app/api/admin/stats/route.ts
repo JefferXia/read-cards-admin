@@ -16,7 +16,7 @@ export async function GET() {
     prisma.cardState.count({ where: { reviewedAt: { not: null } } }),
     prisma.cardState.aggregate({ where: { score: { not: null } }, _avg: { score: true } }),
     prisma.cardState.findMany({
-      where: { reviewedAt: { not: null } },
+      where: { reviewedAt: { not: null }, cardId: { not: null } },
       orderBy: { reviewedAt: 'desc' },
       take: 10,
       include: { card: { select: { title: true } } },
@@ -30,7 +30,7 @@ export async function GET() {
     averageScore: Math.round(avgScore._avg.score ?? 0),
     recentReviews: recentReviews.map((r) => ({
       id: r.id,
-      title: r.card.title,
+      title: r.card!.title,
       score: r.score,
       tier: r.tier,
       reviewedAt: r.reviewedAt,

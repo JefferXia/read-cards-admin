@@ -33,7 +33,8 @@ export async function GET() {
   if (!userId) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
   const states = await prisma.cardState.findMany({
-    where: { userId },
+    // 学过的知识卡 = 全局卡的学习轨迹（自建认知卡走「我的卡片」卡包，不进本页）
+    where: { userId, cardId: { not: null } },
     orderBy: { createdAt: 'asc' },
     select: {
       cardId: true,
@@ -57,24 +58,24 @@ export async function GET() {
 
   const groups = new Map<string, { bookId: string; title: string; cards: LearnedCardOut[] }>()
   for (const s of states) {
-    const b = s.card.book
+    const b = s.card!.book
     let g = groups.get(b.id)
     if (!g) {
       g = { bookId: b.id, title: b.title, cards: [] }
       groups.set(b.id, g)
     }
     g.cards.push({
-      id: s.cardId,
-      module: s.card.module,
-      title: s.card.title,
+      id: s.cardId!,
+      module: s.card!.module,
+      title: s.card!.title,
       // Card 模型无 subtitle 字段，与 /api/review/due 一致：副标题 = definition
-      subtitle: s.card.definition,
-      quote: s.card.quote,
-      source: s.card.source ?? '',
-      definition: s.card.definition,
-      recast: s.card.recast,
-      trigger: s.card.trigger,
-      boundaries: s.card.boundaries.join('\n'),
+      subtitle: s.card!.definition,
+      quote: s.card!.quote,
+      source: s.card!.source ?? '',
+      definition: s.card!.definition,
+      recast: s.card!.recast,
+      trigger: s.card!.trigger,
+      boundaries: s.card!.boundaries.join('\n'),
       learned: true,
       learnedAt: s.createdAt.toISOString(),
       tier: s.tier,

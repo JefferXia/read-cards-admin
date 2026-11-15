@@ -29,8 +29,8 @@ export async function POST(req: Request) {
   const answer = (body.answer ?? '').trim().slice(0, 500)
 
   const state = await prisma.cardState.findFirst({
-    where: { userId, cardId },
-    include: { card: true },
+    where: { userId, OR: [{ cardId: cardId }, { userCardId: cardId }] },
+    include: { card: true, userCard: true },
   })
   if (!state) return NextResponse.json({ error: 'state_not_found' }, { status: 404 })
 
@@ -54,13 +54,16 @@ export async function POST(req: Request) {
   let tier: 0 | 1 | 2
   let feedback = ''
   if (answer) {
+    // 自建认知卡：无 trigger/边界，判分对照卡名 + 重构阐释（definition/trigger 传空）
+    const c = state.card ?? state.userCard
+    if (!c) return NextResponse.json({ error: 'state_not_found' }, { status: 404 })
     const judged = await judgeAnswer(
       {
-        id: state.card.id,
-        title: state.card.title,
-        definition: state.card.definition,
-        recast: state.card.recast,
-        trigger: state.card.trigger,
+        id: c.id,
+        title: c.title,
+        definition: state.card ? state.card.definition : '',
+        recast: c.recast,
+        trigger: state.card ? state.card.trigger : '',
       },
       answer,
     )

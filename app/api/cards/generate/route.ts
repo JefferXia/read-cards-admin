@@ -9,72 +9,66 @@ export const runtime = 'nodejs'
 export const maxDuration = 60
 
 /**
- * POST /api/cards/generate { text, title?, author?, cards? } —— 拍照识别文本 → 知识卡
+ * POST /api/cards/generate { title, text, cards? } —— 拍照/粘贴片段 → 认知卡
  *
- * 小程序端 OCR（书页/白板/讲义）拿到一段文字后调用本接口，实时生成知识卡：
- * - 单次 LLM 调用；卡数按文本长度自适应（几百字 → 3–5 张），宁缺毋滥
- * - 自动入库：通过引文回验的卡全部写入 UserCard（个人资产，可删除，不进全局学习流）
- * - 引文回验：quote 必须能在原文中定位（精确子串或模糊窗口 ≥0.85），
- *   定位失败的卡直接丢弃，不进返回结果 —— OCR 的小误差由模糊匹配兜底
+ * 统一卡型「认知卡」：AI 从片段中提炼 N 张卡（module + 卡名 + 重构阐释），
+ * 原文整段落 quote（翻翻卡背面）。书名（卡包标题）必填。
+ * 自动入库：通过的卡全部写入 UserCard（个人资产，可删除，可加入复习周期）
  *
  * 请求体：
- *   text   必填，OCR 文本（30–8000 字）
- *   title  可选，来源标注（如「关键对话 第3章」），缺省「未命名片段」
- *   author 可选，缺省「未知作者」
- *   cards  可选，目标卡数（3–15），缺省按文本长度自适应
+ *   title 书名（必填，≤60 字，作为卡包标题）
+ *   text  必填，OCR 文本（30–8000 字）
  *
- * 返回：{ cards: [{ module, name, definition, quote, source, reconstruct, trigger, boundaries[] }] }
+ * 卡数由 AI 按内容密度自行判断（1–10 张），端上不传/忽略卡数参数。
+ *
+ * 返回：{ cards: [{ id?, module, title, recast, quote }] }
  */
 export async function POST(req: Request) {
   const userId = await currentUserId()
   if (!userId) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
   const body = (await req.json().catch(() => ({}))) as {
-    text?: string
     title?: string
-    author?: string
-    cards?: number
+    text?: string
   }
   const text = (body.text ?? '').trim()
   if (text.length < 30) return NextResponse.json({ error: 'text_too_short' }, { status: 400 })
   if (text.length > 8000) return NextResponse.json({ error: 'text_too_long' }, { status: 400 })
 
-  const title = (body.title ?? '').trim().slice(0, 60) || '未命名片段'
-  const author = (body.author ?? '').trim().slice(0, 60) || '未知作者'
-  const targetCards = typeof body.cards === 'number' ? Math.min(15, Math.max(3, body.cards)) : undefined
+  // 书名（卡包标题）必填
+  const title = (body.title ?? '').trim().slice(0, 60)
+  if (!title) return NextResponse.json({ error: 'title_required' }, { status: 400 })
 
   if (llmProvider() === 'mock') {
     return NextResponse.json({ error: 'llm_not_configured' }, { status: 503 })
   }
 
   try {
-    const report = await generateCards({ title, author, text, targetCards })
+    const report = await generateCards({ title, text })
+    if (report.cards.length === 0) {
+      return NextResponse.json({ error: 'generate_failed' }, { status: 502 })
+    }
     // 自动入库：通过的卡全部落 UserCard。入库失败不吞掉生成结果——降级为不带回 id 返回
+    const cards: { id?: string; module: string; title: string; recast: string; quote: string }[] = []
     try {
-      const cards = []
       for (const c of report.cards) {
         const row = await prisma.userCard.create({
           data: {
             userId,
             sourceTitle: title,
-            sourceAuthor: author,
             module: c.module,
             title: c.name,
-            definition: c.definition,
-            quote: c.quote,
-            recast: c.reconstruct,
-            trigger: c.trigger,
-            boundaries: c.boundaries,
-            source: c.source,
+            recast: c.recast,
+            quote: text,
           },
         })
-        cards.push({ id: row.id, ...c })
+        cards.push({ id: row.id, module: c.module, title: c.name, recast: c.recast, quote: text })
       }
-      return NextResponse.json({ cards })
     } catch (e) {
       console.error('[cards/generate] 入库失败，降级返回', e)
-      return NextResponse.json({ cards: report.cards })
+      return NextResponse.json({ cards: report.cards.map((c) => ({ module: c.module, title: c.name, recast: c.recast, quote: text })) })
     }
+    return NextResponse.json({ cards })
   } catch (e) {
     console.error('[cards/generate]', e)
     return NextResponse.json({ error: 'generate_failed' }, { status: 502 })

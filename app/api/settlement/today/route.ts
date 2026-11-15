@@ -14,7 +14,7 @@ export async function GET() {
   const [learnedToday, reviewed, credits] = await Promise.all([
     prisma.cardState.count({ where: { userId, createdAt: { gte: dayStart(now) } } }),
     prisma.cardState.findMany({
-      where: { userId, reviewedAt: { gte: dayStart(now) } },
+      where: { userId, reviewedAt: { gte: dayStart(now) }, cardId: { not: null } },
       include: { card: { select: { id: true, title: true } } },
       orderBy: { reviewedAt: 'desc' },
     }),
@@ -28,8 +28,8 @@ export async function GET() {
     learnedToday,
     reviewedToday: reviewed.length,
     results: reviewed.map((r) => ({
-      cardId: r.card.id,
-      title: r.card.title,
+      cardId: r.card!.id,
+      title: r.card!.title,
       score: r.score,
       tier: r.tier,
     })),
