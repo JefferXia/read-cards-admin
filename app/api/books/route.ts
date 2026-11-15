@@ -5,14 +5,14 @@ import { currentUserId } from '@/lib/auth'
 export const runtime = 'nodejs'
 
 /**
- * GET /api/books —— 全部在架书（发现卡组页数据源）
- * 返回 ACTIVE 书 + 本书 APPROVED 卡数（卡组右上角展示）。
+ * GET /api/books —— 全部在架书（发现卡页数据源）
+ * 返回除 DRAFT 外的所有书（ACTIVE / ARCHIVED）+ 本书 APPROVED 卡数（卡包右上角展示）。
  * 会话自检不拦截：书列表本身公开。
  */
 export async function GET() {
   const [books, counts] = await Promise.all([
     prisma.book.findMany({
-      where: { status: 'ACTIVE' },
+      where: { status: { not: 'DRAFT' } },
       orderBy: { title: 'asc' },
       select: {
         id: true,

@@ -239,25 +239,6 @@ export async function bookDeck(userId: string, bookId: string) {
 }
 
 /**
- * 每日领取（打卡）统计：今天是否已领 + 连续领取天数
- * 连续口径：从今天（今天未领则从昨天）往回数连续领取的天数，漏一天归零。
+ * 每日领取（打卡）统计已下线：claimedToday 用单条 count 现查（/api/me），
+ * 连续天数由小程序端本地计算（进入小程序即算）。
  */
-export async function claimStats(userId: string) {
-  const claims = await prisma.dailyClaim.findMany({
-    where: { userId },
-    orderBy: { claimDate: 'desc' },
-    take: 400,
-    select: { claimDate: true },
-  })
-  const dates = new Set(claims.map((c) => c.claimDate))
-
-  const now = new Date()
-  const claimedToday = dates.has(dateKey(now))
-  let cursor = claimedToday ? now : new Date(now.getTime() - DAY_MS)
-  let streakDays = 0
-  while (dates.has(dateKey(cursor))) {
-    streakDays++
-    cursor = new Date(cursor.getTime() - DAY_MS)
-  }
-  return { claimedToday, streakDays }
-}

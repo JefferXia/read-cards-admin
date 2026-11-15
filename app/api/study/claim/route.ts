@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { currentUserId } from '@/lib/auth'
-import { claimBook, claimStats, dateKey } from '@/lib/study'
+import { claimBook, dateKey } from '@/lib/study'
 
 export const runtime = 'nodejs'
 
@@ -42,6 +42,5 @@ export async function POST(req: Request) {
   }
   await Promise.all(ops)
 
-  const claim = await claimStats(userId)
-  return NextResponse.json({ ok: true, claimedToday: true, streakDays: claim.streakDays })
+  return NextResponse.json({ ok: true, claimedToday: true })
 }
