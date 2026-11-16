@@ -6,7 +6,7 @@
  *
  * 设计要点：
  * - 单次 LLM 调用；卡数由 AI 按内容密度自行判断（1–10 张），宁缺毋滥
- * - 原文整段作为 quote（翻翻卡背面），不做引文回验
+ * - 每卡附逐字原文摘录 quote（AI 从原文摘出与该卡对应的句子，不改写；缺省回退整段原文），不做引文回验
  */
 import { chatJson, extractJson, llmProvider, type ChatMessage } from './llm'
 
@@ -14,6 +14,8 @@ export interface GenCard {
   module: string
   name: string
   recast: string
+  /** 逐字原文摘录（与该卡对应的句子；缺省 = 未摘出，落库回退整段原文） */
+  quote?: string
 }
 
 export interface GenOptions {
@@ -60,12 +62,14 @@ function systemPrompt(title: string): string {
 - module：2–4 字归类（这个观点属于什么主题/维度，如「道体」「处世」「沟通」），贴着这段文字自己的语言来，不要用空泛的通用词
 - name：卡名，10 字以内，一眼看出这张卡在说什么
 - recast：重构阐释，2–4 句。先把原文观点压缩到关键，再用现代语言写出可迁移的理解；不要直接抄原文
+- quote：原文摘录，从原文中逐字复制与这张卡对应的那几句原文（保留原有标点，一句到几句均可；不要改写、不要概括、不要缩写、不要拼接原文中不相邻的句子）
 
 要求：
 - 一个观点一张卡，卡与卡之间不重复、不互相包含
 - 宁精勿多：原文信息少就少出卡，一两张也完全可以，绝不硬凑、不把一段话拆成碎卡
+- quote 必须是原文的连续片段，逐字复制；实在无法对应时可以省略该字段
 
-输出 JSON：{"cards":[{"module":"...","name":"...","recast":"..."}]}。不要输出 JSON 以外的任何文字。`
+输出 JSON：{"cards":[{"module":"...","name":"...","recast":"...","quote":"..."}]}。不要输出 JSON 以外的任何文字。`
 }
 
 // ---------- 主入口 ----------
@@ -74,6 +78,7 @@ interface RawCard {
   module?: string
   name?: string
   recast?: string
+  quote?: string
 }
 
 export async function generateCards(opts: GenOptions): Promise<GenReport> {
@@ -111,6 +116,8 @@ ${opts.text}
       module: (c.module ?? '').trim() || '认知',
       name: c.name,
       recast: c.recast,
+      // 摘录逐字透传，空串视为未摘出（落库时回退整段原文）
+      quote: (c.quote ?? '').trim() || undefined,
     })
   }
   stages.push(`通过 ${cards.length} 张，丢弃 ${dropped.length} 张`)
