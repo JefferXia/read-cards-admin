@@ -5,8 +5,8 @@ import { prisma } from '@/lib/db'
 
 export const runtime = 'nodejs'
 
-/** DB 行 → API 卡片（module + 卡名 + 重构阐释 + 原文整段，按 sourceTitle 聚合卡包） */
-function toApi(r: UserCard) {
+/** DB 行 → API 卡片（module + 卡名 + 重构阐释 + 原文整段，按 sourceTitle 聚合卡包；enrolled = 是否已加入记忆） */
+function toApi(r: UserCard, enrolled: boolean) {
   return {
     id: r.id,
     module: r.module,
@@ -16,10 +16,11 @@ function toApi(r: UserCard) {
     sourceTitle: r.sourceTitle,
     sourceAuthor: r.sourceAuthor,
     createdAt: r.createdAt,
+    enrolled,
   }
 }
 
-/** GET /api/user-cards —— 我的认知卡（新→旧，上限 200 条） */
+/** GET /api/user-cards —— 我的认知卡（新→旧，上限 200 条，含是否已加入记忆） */
 export async function GET() {
   const userId = await currentUserId()
   if (!userId) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
@@ -29,7 +30,15 @@ export async function GET() {
     orderBy: { createdAt: 'desc' },
     take: 200,
   })
-  return NextResponse.json({ cards: rows.map(toApi) })
+  // 已加入记忆 = 存在对应 CardState（入册即到期）
+  const states = rows.length
+    ? await prisma.cardState.findMany({
+        where: { userId, userCardId: { in: rows.map((r) => r.id) } },
+        select: { userCardId: true },
+      })
+    : []
+  const enrolledIds = new Set(states.map((s) => s.userCardId))
+  return NextResponse.json({ cards: rows.map((r) => toApi(r, enrolledIds.has(r.id))) })
 }
 
 /**
