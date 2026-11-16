@@ -1,14 +1,13 @@
 import { NextResponse } from 'next/server'
 import { currentUserId } from '@/lib/auth'
 import { prisma } from '@/lib/db'
-import { initialDue } from '@/lib/study'
 
 export const runtime = 'nodejs'
 
 /**
  * POST /api/user-cards/review { id } —— 自建认知卡加入复习周期
  *
- * 首次到期按全局卡同款节奏：次日（initialDue，约 20 小时后）。
+ * 入册即到期（dueAt = now），马上出现在复习队列；与全局卡「加入记忆」同款节奏。
  * 幂等：已入册返回 { ok: true, already: true }；卡不存在/别人的统一 404。
  */
 export async function POST(req: Request) {
@@ -32,7 +31,7 @@ export async function POST(req: Request) {
     data: {
       userId,
       userCardId: id,
-      dueAt: initialDue(), // 首次复习明日到期，与全局卡入册节奏一致
+      dueAt: new Date(), // 入册即到期：马上进入复习队列
       phase: 'NEW',
     },
   })
