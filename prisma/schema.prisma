@@ -77,6 +77,10 @@ model Card {
   /// 出处（篇章引用；公版书可引，版权书不露书名）
   source     String?
   status     CardStatus @default(DRAFT) // 仅 APPROVED 进入学习流
+  /// 朗读音频（TTS 合成后转存对象存储的 URL；按需生成，空 = 未生成）
+  audioUrl   String?
+  /// 朗读音频时长（毫秒）
+  audioMs    Int?
 
   chapter    Chapter?    @relation(fields: [chapterId], references: [id])
   cardStates CardState[]

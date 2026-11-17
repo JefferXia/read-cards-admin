@@ -234,6 +234,7 @@ export async function bookDeck(userId: string, bookId: string) {
       recast: c.recast,
       trigger: c.trigger,
       boundaries: c.boundaries.join('\n'),
+      audioUrl: c.audioUrl,
       learned: learned.has(c.id),
     }
   })
