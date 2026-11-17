@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server'
 import { currentUserId } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { initialDue } from '@/lib/study'
 
 export const runtime = 'nodejs'
 
 /**
  * POST /api/cards/review { cardId } —— 全局书卡加入记忆（入册复习周期）
- * 入册即到期（dueAt = now），马上出现在复习队列；与 /api/user-cards/review（自建卡）同款节奏。
+ * 入册次日到期（dueAt ≈ 20 小时后），明天出现在复习队列；与 /api/user-cards/review（自建卡）同款节奏。
  * 幂等：已入册返回 { ok: true, already: true }；卡不存在统一 404。
  */
 export async function POST(req: Request) {
@@ -33,7 +34,7 @@ export async function POST(req: Request) {
     data: {
       userId,
       cardId,
-      dueAt: new Date(), // 入册即到期：马上进入复习队列（读书学卡流程 study/complete 仍次日到期）
+      dueAt: initialDue(), // 入册次日到期：明天进入复习队列（与 study/complete 学卡同款节奏）
       phase: 'NEW',
     },
   })

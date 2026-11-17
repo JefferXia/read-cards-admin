@@ -32,12 +32,13 @@ export function initialDue(now = new Date()): Date {
   return new Date(now.getTime() + 20 * 60 * 60 * 1000)
 }
 
-/** 复习间隔阶梯（天）：1 → 3 → 7 → 14 → 30（封顶） */
+/** 复习间隔阶梯（天）：第 1 步（1 天）= 入册/学完 → 首次复习；复习后的间隔从第 2 步起：3 → 7 → 14 → 30（封顶） */
 export const INTERVAL_LADDER = [1, 3, 7, 14, 30]
 
 /**
  * 自适应复习排程：按三档结论重排下次到期时间。
- * - tier 1/2 都正常推进阶梯（1→3→7→14→30 天，封顶 30）
+ * - 首次复习前的那段间隔（入册即到期 / 学完次日）已消耗阶梯第 1 步（1 天），
+ *   复习后的间隔自第 2 步起算：第 1 次复习后 3 天、第 2 次后 7 天、第 3 次后 14 天、之后 30 天封顶
  * - tier 0 有点遗忘：阶梯归零，回起点（1 天后再见）
  * - 毕业不看间隔，累计两次「很巩固」（tier2Count ≥ 2）即 MASTERED
  */
@@ -52,7 +53,8 @@ export function scheduleReview(
     return { phase: 'MASTERED' as const, reps: state.reps, tier2Count, intervalDays: null, dueAt: now }
   }
   const reps = tier === 0 ? 0 : state.reps + 1
-  const intervalDays = INTERVAL_LADDER[Math.max(Math.min(reps - 1, INTERVAL_LADDER.length - 1), 0)]
+  // 间隔按「已完成的复习轮数」取阶梯：reps=1 → 3 天，2 → 7 天，3 → 14 天，≥4 → 30 天封顶；tier0 归零 → 1 天
+  const intervalDays = INTERVAL_LADDER[Math.min(Math.max(reps, 0), INTERVAL_LADDER.length - 1)]
   return {
     phase: 'DONE' as const,
     reps,

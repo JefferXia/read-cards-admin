@@ -19,8 +19,10 @@ interface LearnedCardOut {
   learned: boolean
   /** 学卡时间（ISO，即卡片入册时间） */
   learnedAt: string
-  /** 下次记忆时间（ISO，当前排程的到期时间） */
+  /** 下次记忆时间（ISO，当前排程的到期时间；毕业卡 = 毕业时刻） */
   nextAt: string
+  /** 是否已毕业（MASTERED，两次「很巩固」，退出复习队列） */
+  graduated: boolean
   /** 记忆进度 0–100（打分 + 复习轮数 + 巩固次数综合） */
   progress: number
 }
@@ -34,10 +36,11 @@ function memoryProgress(s: { score: number | null; reps: number; tier2Count: num
 }
 
 /**
- * GET /api/mine/learned —— 个人主页：在记忆的卡（入册未毕业）
+ * GET /api/mine/learned —— 个人主页：在记忆的卡（全部记忆轨迹，含毕业卡）
  * 全局卡 + 自建认知卡都在内（CardState 用户数据；自建卡按 sourceTitle 聚合，bookId 为空串），
  * 以书名/卡包名聚合（首次学卡时间正序），书内按学习时间正序；
- * 毕业卡（MASTERED，两次「很巩固」）不在本接口返回 —— 它们计入 /api/me 的成功记忆。
+ * 毕业卡（MASTERED，两次「很巩固」）也返回，带 graduated 标记（dueAt = 毕业时刻），
+ * 前端据此把卡脚显示为「已毕业」。毕业卡同时计入 /api/me 的成功记忆。
  * progress = 记忆进度 0–100（打分/复习轮数/巩固次数综合），前端进度条展示。
  */
 export async function GET() {
@@ -45,9 +48,8 @@ export async function GET() {
   if (!userId) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
   const states = await prisma.cardState.findMany({
-    // 在记忆的卡 = 全部学习轨迹（全局卡 cardId + 自建认知卡 userCardId）；
-    // 只出未毕业的：MASTERED 已退出复习队列，不再列出
-    where: { userId, phase: { not: 'MASTERED' } },
+    // 全部学习轨迹（全局卡 cardId + 自建认知卡 userCardId），毕业卡不排除、用 graduated 标记区分
+    where: { userId },
     orderBy: { createdAt: 'asc' },
     select: {
       cardId: true,
@@ -57,6 +59,7 @@ export async function GET() {
       tier2Count: true,
       createdAt: true,
       dueAt: true,
+      phase: true,
       card: {
         select: {
           module: true,
@@ -99,6 +102,7 @@ export async function GET() {
         learned: true,
         learnedAt: s.createdAt.toISOString(),
         nextAt: s.dueAt.toISOString(),
+        graduated: s.phase === 'MASTERED',
         progress: memoryProgress(s),
       })
     } else if (s.userCard) {
@@ -125,6 +129,7 @@ export async function GET() {
         learned: true,
         learnedAt: s.createdAt.toISOString(),
         nextAt: s.dueAt.toISOString(),
+        graduated: s.phase === 'MASTERED',
         progress: memoryProgress(s),
       })
     }
