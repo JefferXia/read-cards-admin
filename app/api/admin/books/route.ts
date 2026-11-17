@@ -9,6 +9,42 @@ async function guard() {
   return null
 }
 
+/** GET /api/admin/books —— 书单（轻量：仅计数，不嵌卡内容；配合 /api/admin/cards?bookId= 两级加载） */
+export async function GET() {
+  const denied = await guard()
+  if (denied) return denied
+
+  const [books, approved] = await Promise.all([
+    prisma.book.findMany({
+      orderBy: { slug: 'asc' },
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        subtitle: true,
+        author: true,
+        status: true,
+        _count: { select: { chapters: true, cards: true } },
+      },
+    }),
+    prisma.card.groupBy({ by: ['bookId'], where: { status: 'APPROVED' }, _count: { _all: true } }),
+  ])
+  const approvedMap = new Map(approved.map((g) => [g.bookId, g._count._all]))
+  return NextResponse.json({
+    books: books.map((b) => ({
+      id: b.id,
+      slug: b.slug,
+      title: b.title,
+      subtitle: b.subtitle,
+      author: b.author,
+      status: b.status,
+      chapterCount: b._count.chapters,
+      cardCount: b._count.cards,
+      approvedCount: approvedMap.get(b.id) ?? 0,
+    })),
+  })
+}
+
 /** PATCH /api/admin/books —— 编辑书状态（ACTIVE 全局唯一，切换时自动归档其它在学书） */
 export async function PATCH(req: Request) {
   const denied = await guard()

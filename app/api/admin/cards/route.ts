@@ -9,13 +9,16 @@ async function guard() {
   return null
 }
 
-/** GET /api/admin/cards —— 全书章节 + 卡片（管理视角） */
-export async function GET() {
+/** GET /api/admin/cards?bookId= —— 单本书的章节 + 卡片全量（管理视角，进书编辑时才拉取） */
+export async function GET(req: Request) {
   const denied = await guard()
   if (denied) return denied
 
-  const books = await prisma.book.findMany({
-    orderBy: { slug: 'asc' },
+  const bookId = new URL(req.url).searchParams.get('bookId')
+  if (!bookId) return NextResponse.json({ error: 'bad_request' }, { status: 400 })
+
+  const book = await prisma.book.findUnique({
+    where: { id: bookId },
     include: {
       chapters: {
         orderBy: { idx: 'asc' },
@@ -24,7 +27,8 @@ export async function GET() {
       cards: { where: { chapterId: null }, orderBy: { sortOrder: 'asc' } }, // 仅直属卡（无章节卡）
     },
   })
-  return NextResponse.json({ books })
+  if (!book) return NextResponse.json({ error: 'not_found' }, { status: 404 })
+  return NextResponse.json({ book })
 }
 
 /** POST /api/admin/cards —— 新建卡片（草稿）；挂载点二选一：chapterId（章节卡）或 bookId（直属卡） */

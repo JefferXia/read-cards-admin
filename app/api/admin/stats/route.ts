@@ -8,32 +8,41 @@ export const runtime = 'nodejs'
 export async function GET() {
   if (!(await isAdmin())) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
-  const [users, cards, approved, draft, reviewedCount, avgScore, recentReviews] = await Promise.all([
-    prisma.user.count(),
-    prisma.card.count(),
-    prisma.card.count({ where: { status: 'APPROVED' } }),
-    prisma.card.count({ where: { status: 'DRAFT' } }),
-    prisma.cardState.count({ where: { reviewedAt: { not: null } } }),
-    prisma.cardState.aggregate({ where: { score: { not: null } }, _avg: { score: true } }),
-    prisma.cardState.findMany({
-      where: { reviewedAt: { not: null }, cardId: { not: null } },
-      orderBy: { reviewedAt: 'desc' },
-      take: 10,
-      include: { card: { select: { title: true } } },
-    }),
-  ])
+  try {
+    const [users, cards, approved, draft, reviewedCount, avgScore, recentReviews] = await Promise.all([
+      prisma.user.count(),
+      prisma.card.count(),
+      prisma.card.count({ where: { status: 'APPROVED' } }),
+      prisma.card.count({ where: { status: 'DRAFT' } }),
+      prisma.cardState.count({ where: { reviewedAt: { not: null } } }),
+      prisma.cardState.aggregate({ where: { score: { not: null } }, _avg: { score: true } }),
+      prisma.cardState.findMany({
+        where: { reviewedAt: { not: null }, cardId: { not: null } },
+        orderBy: { reviewedAt: 'desc' },
+        take: 10,
+        include: { card: { select: { title: true } } },
+      }),
+    ])
 
-  return NextResponse.json({
-    users,
-    cards: { total: cards, approved, draft },
-    reviewedCount,
-    averageScore: Math.round(avgScore._avg.score ?? 0),
-    recentReviews: recentReviews.map((r) => ({
-      id: r.id,
-      title: r.card!.title,
-      score: r.score,
-      tier: r.tier,
-      reviewedAt: r.reviewedAt,
-    })),
-  })
+    return NextResponse.json({
+      users,
+      cards: { total: cards, approved, draft },
+      reviewedCount,
+      averageScore: Math.round(avgScore._avg.score ?? 0),
+      recentReviews: recentReviews.map((r) => ({
+        id: r.id,
+        title: r.card?.title ?? '（卡已删除）',
+        score: r.score,
+        tier: r.tier,
+        reviewedAt: r.reviewedAt,
+      })),
+    })
+  } catch (e) {
+    console.error('[api/admin/stats]', e)
+    // dev 环境附带错误详情便于排查（管理台接口，不外泄生产）
+    return NextResponse.json(
+      { error: 'stats_failed', detail: process.env.NODE_ENV === 'production' ? undefined : String(e) },
+      { status: 500 },
+    )
+  }
 }

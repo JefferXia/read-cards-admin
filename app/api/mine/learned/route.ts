@@ -103,7 +103,9 @@ export async function GET() {
         learnedAt: s.createdAt.toISOString(),
         nextAt: s.dueAt.toISOString(),
         graduated: s.phase === 'MASTERED',
-        progress: memoryProgress(s),
+        // 毕业即完全掌握：直接 100%（memoryProgress 的三档权重是给在学卡设计的，
+        // 毕业路径 reps 最多 2~3 轮，永远算不满）
+        progress: s.phase === 'MASTERED' ? 100 : memoryProgress(s),
       })
     } else if (s.userCard) {
       // 自建认知卡（按卡包标题聚合，bookId 空串）
@@ -130,7 +132,7 @@ export async function GET() {
         learnedAt: s.createdAt.toISOString(),
         nextAt: s.dueAt.toISOString(),
         graduated: s.phase === 'MASTERED',
-        progress: memoryProgress(s),
+        progress: s.phase === 'MASTERED' ? 100 : memoryProgress(s),
       })
     }
   }
