@@ -166,6 +166,10 @@ model UserCard {
   quote        String
   /// 重构阐释（AI 用现代语言展开）
   recast       String
+  /// 朗读音频（首次点播放时按需合成 recast → 转存 Vercel Blob → 回写；不做批量预生成）
+  audioUrl     String?
+  /// 朗读音频时长（毫秒）
+  audioMs      Int?
   createdAt    DateTime @default(now())
 
   user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)

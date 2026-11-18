@@ -15,6 +15,7 @@ function toCardOut(d: {
     quote: string
     sourceTitle: string
     recast: string
+    audioUrl: string | null
   } | null
   card: {
     id: string
@@ -41,7 +42,9 @@ function toCardOut(d: {
       trigger: '',
       boundaries: '',
       learned: true,
-      audioUrl: null,
+      kind: 'user',
+      // 自建卡音频：首次点播放时按需合成 recast 并回写，之后直读库
+      audioUrl: d.userCard.audioUrl,
     }
   }
   return {
@@ -55,6 +58,7 @@ function toCardOut(d: {
     trigger: d.card!.trigger,
     boundaries: d.card!.boundaries.join('\n'),
     learned: true,
+    kind: 'card',
     audioUrl: d.card!.audioUrl,
   }
 }

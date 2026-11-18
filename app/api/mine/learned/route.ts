@@ -25,6 +25,10 @@ interface LearnedCardOut {
   graduated: boolean
   /** 记忆进度 0–100（打分 + 复习轮数 + 巩固次数综合） */
   progress: number
+  /** 朗读音频（null = 未生成，点播放时服务端按需合成 recast 并缓存） */
+  audioUrl: string | null
+  /** 卡来源：card = 书卡，user = 自建卡（点播放传给 /api/tts 免级联查询） */
+  kind: 'card' | 'user'
 }
 
 /** 记忆进度 0–100：最近打分 40% + 复习轮数 40%（阶梯 5 级封顶）+ 巩固次数 20%（毕业 2 次封顶） */
@@ -36,9 +40,9 @@ function memoryProgress(s: { score: number | null; reps: number; tier2Count: num
 }
 
 /**
- * GET /api/mine/learned —— 个人主页：在记忆的卡（全部记忆轨迹，含毕业卡）
+ * GET /api/mine/learned —— 个人主页：在学的卡（全部记忆轨迹，含毕业卡）
  * 全局卡 + 自建认知卡都在内（CardState 用户数据；自建卡按 sourceTitle 聚合，bookId 为空串），
- * 以书名/卡包名聚合（首次学卡时间正序），书内按学习时间正序；
+ * 以书名/卡包名聚合（最近学卡的书在前），书内按学习时间倒序（新→旧）；
  * 毕业卡（MASTERED，两次「很巩固」）也返回，带 graduated 标记（dueAt = 毕业时刻），
  * 前端据此把卡脚显示为「已毕业」。毕业卡同时计入 /api/me 的成功记忆。
  * progress = 记忆进度 0–100（打分/复习轮数/巩固次数综合），前端进度条展示。
@@ -50,7 +54,8 @@ export async function GET() {
   const states = await prisma.cardState.findMany({
     // 全部学习轨迹（全局卡 cardId + 自建认知卡 userCardId），毕业卡不排除、用 graduated 标记区分
     where: { userId },
-    orderBy: { createdAt: 'asc' },
+    // 学习时间倒序（新→旧）：最近在学的卡/书排前面
+    orderBy: { createdAt: 'desc' },
     select: {
       cardId: true,
       userCardId: true,
@@ -70,10 +75,11 @@ export async function GET() {
           recast: true,
           trigger: true,
           boundaries: true,
+          audioUrl: true,
           book: { select: { id: true, title: true } },
         },
       },
-      userCard: { select: { sourceTitle: true, sourceAuthor: true, module: true, title: true, quote: true, recast: true } },
+      userCard: { select: { sourceTitle: true, sourceAuthor: true, module: true, title: true, quote: true, recast: true, audioUrl: true } },
     },
   })
 
@@ -106,6 +112,8 @@ export async function GET() {
         // 毕业即完全掌握：直接 100%（memoryProgress 的三档权重是给在学卡设计的，
         // 毕业路径 reps 最多 2~3 轮，永远算不满）
         progress: s.phase === 'MASTERED' ? 100 : memoryProgress(s),
+        audioUrl: s.card.audioUrl,
+        kind: 'card',
       })
     } else if (s.userCard) {
       // 自建认知卡（按卡包标题聚合，bookId 空串）
@@ -133,6 +141,8 @@ export async function GET() {
         nextAt: s.dueAt.toISOString(),
         graduated: s.phase === 'MASTERED',
         progress: s.phase === 'MASTERED' ? 100 : memoryProgress(s),
+        audioUrl: uc.audioUrl,
+        kind: 'user',
       })
     }
   }
