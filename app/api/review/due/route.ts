@@ -26,6 +26,7 @@ function toCardOut(d: {
     recast: string
     trigger: string
     boundaries: string[]
+    audioUrl: string | null
   } | null
 }) {
   if (d.userCardId && d.userCard) {
@@ -40,6 +41,7 @@ function toCardOut(d: {
       trigger: '',
       boundaries: '',
       learned: true,
+      audioUrl: null,
     }
   }
   return {
@@ -53,6 +55,7 @@ function toCardOut(d: {
     trigger: d.card!.trigger,
     boundaries: d.card!.boundaries.join('\n'),
     learned: true,
+    audioUrl: d.card!.audioUrl,
   }
 }
 
