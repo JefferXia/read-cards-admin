@@ -20,9 +20,10 @@ export async function code2Session(code: string): Promise<WxSession | null> {
     `&secret=${secret}&js_code=${encodeURIComponent(code)}&grant_type=authorization_code`
   const res = await fetch(url)
   if (!res.ok) return null
-  const data = (await res.json()) as { openid?: string; errcode?: number }
+  const data = (await res.json()) as { openid?: string; session_key?: string; errcode?: number }
   if (!data.openid) return null
-  return { openid: data.openid }
+  // session_key 需要落库：虚拟支付「用户态签名 signature」用它做 HMAC 密钥（重新登录会刷新）
+  return { openid: data.openid, session_key: data.session_key }
 }
 
 export interface SecCheckResult {

@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { currentUserId } from '@/lib/auth'
-import { dateKey, resolveBook, todayPlan } from '@/lib/study'
+import { dateKey, isMember, resolveBook, todayPlan } from '@/lib/study'
 
 export const runtime = 'nodejs'
 
 /**
- * GET /api/me —— 领取页（claim）专用：今日书 + 今日目标 + 是否已领 + 到期数
- * 消费方：领取页（book / study.cap / progress.totalCards / dueCount / claimedToday）。
+ * GET /api/me —— 领取页（claim）专用：今日书 + 今日目标 + 是否已领 + 到期数 + 会员状态
+ * 消费方：领取页（book / study.cap / progress.totalCards / dueCount / claimedToday）；
+ * 我的页（membership.active / membership.expiresAt 判断是否再购）。
  * 昵称、进入/成功记忆走 /api/mine/profile；到期通知（首页）走 /api/review/due-count；
  * 今日学/学/余量走 /api/study/next —— 本接口不再返回冗余字段。
  */
@@ -16,7 +17,7 @@ export async function GET() {
   if (!userId) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
   const now = new Date()
-  const [book, dueCount, claimedToday] = await Promise.all([
+  const [book, dueCount, claimedToday, user] = await Promise.all([
     resolveBook(userId),
     // 到期数含首次到期（NEW）与复习过再次到期（DONE）；MASTERED 不计
     prisma.cardState.count({
@@ -24,14 +25,16 @@ export async function GET() {
     }),
     // 今天是否已领取（单条 count；连续天数已改端上本地计算，不再拉 400 行记录）
     prisma.dailyClaim.count({ where: { userId, claimDate: dateKey(now) } }),
+    // 会员状态（「会员月卡」到期时间；空 = 从未开通）
+    prisma.user.findUnique({ where: { id: userId }, select: { membershipExpiresAt: true } }),
   ])
 
-  // study.cap = 今日目标（固定额度，书尾取余量）；progress.totalCards = 本书 APPROVED 卡总数
+  // study.cap = 今日目标（固定额度 ×2 if 会员，书尾取余量）；progress.totalCards = 本书 APPROVED 卡总数
   let cap = 0
   let totalCards = 0
   if (book) {
     const [plan, tc] = await Promise.all([
-      todayPlan(userId, book.id),
+      todayPlan(userId, book.id, isMember(user?.membershipExpiresAt, now)),
       // 本书总卡数（无章节卡的非公版书没有章可汇总，直接按书数）
       prisma.card.count({ where: { bookId: book.id, status: 'APPROVED' } }),
     ])
@@ -44,6 +47,10 @@ export async function GET() {
     study: { cap },
     progress: { totalCards },
     claimedToday,
+    membership: {
+      active: isMember(user?.membershipExpiresAt, now),
+      expiresAt: user?.membershipExpiresAt ?? null,
+    },
     book: book
       ? {
           id: book.id,

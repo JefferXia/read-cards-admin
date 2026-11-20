@@ -18,10 +18,15 @@ export async function POST(req: Request) {
     )
   }
 
+  // sessionKey 落库（虚拟支付 payData 的用户态签名 signature 密钥；重新登录即刷新）
   const user = await prisma.user.upsert({
     where: { openId: session.openid },
-    update: {},
-    create: { openId: session.openid, nickname: randomNickname() },
+    update: session.session_key ? { sessionKey: session.session_key } : {},
+    create: {
+      openId: session.openid,
+      nickname: randomNickname(),
+      sessionKey: session.session_key ?? null,
+    },
   })
   // 存量用户昵称兜底（早期建号未写入昵称，下次登录补上）
   if (!user.nickname) {

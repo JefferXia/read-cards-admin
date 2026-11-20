@@ -18,8 +18,14 @@ export function dateKey(d = new Date()): string {
   return `${y}-${m}-${day}`
 }
 
-export function newCardsCap(): number {
-  return Number(process.env.DAILY_NEW_CARDS ?? 6)
+export function newCardsCap(member = false): number {
+  const cap = Number(process.env.DAILY_NEW_CARDS ?? 6)
+  return member ? cap * 2 : cap
+}
+
+/** 是否会员（虚拟支付「会员月卡」未到期即会员；权益：今日目标 ×2） */
+export function isMember(membershipExpiresAt: Date | null | undefined, now = new Date()): boolean {
+  return Boolean(membershipExpiresAt && membershipExpiresAt > now)
 }
 
 /** 单次复习队列上限（复习只做一遍，队列逐张过完即止） */
@@ -149,8 +155,8 @@ export async function claimBook(userId: string, wantedBookId?: string) {
  * 未学卡按章节顺序顺位取；今天已学的卡保留在计划里（前端展示勾），
  * 学一张少一张待学、不后移，计划当天稳定。书余量不足时有多少取多少。
  */
-export async function todayPlan(userId: string, bookId: string) {
-  const cap = newCardsCap()
+export async function todayPlan(userId: string, bookId: string, member = false) {
+  const cap = newCardsCap(member)
   const dayStartAt = dayStart()
   const [states, cards] = await Promise.all([
     prisma.cardState.findMany({

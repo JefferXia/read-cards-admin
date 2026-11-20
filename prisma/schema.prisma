@@ -17,11 +17,17 @@ model User {
   nickname  String?
   createdAt DateTime @default(now())
 
+  /// code2Session 返回的 session_key（虚拟支付用户态签名 signature 的密钥；重新登录会刷新）
+  sessionKey String?
+  /// 会员到期时间（虚拟支付「会员月卡」发货时延长；空 = 从未开通）
+  membershipExpiresAt DateTime?
+
   cardStates   CardState[]
   dailyClaims  DailyClaim[]
   userBooks    UserBook[]
   userCards    UserCard[]
   subscribeCredits SubscribeCredit?
+  orders       Order[]
   pushLogs     PushLog[]
 }
 
@@ -196,6 +202,43 @@ model PushLog {
   sentAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id])
+}
+
+/// 虚拟支付订单（道具直购「会员月卡」）
+/// 生命周期：CREATED（下单待支付）→ PAID（平台已扣款，待发货）→ DELIVERED（已发货）
+/// 幂等去重以平台单号 wxOrderId（WeChatPayInfo.MchOrderNo）为准
+model Order {
+  id          String    @id @default(cuid())
+  /// 业务单号：下单时生成，8-32 位、不能以下划线开头，必须唯一
+  outTradeNo  String    @unique
+  /// 平台单号 wx_order_id（发货推送 WeChatPayInfo.MchOrderNo；查单返回 order_id）
+  wxOrderId   String?   @unique
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  /// 道具 ID（MP 后台【道具管理】创建）
+  productId   String
+  /// 购买数量（固定 1）
+  buyQuantity Int       @default(1)
+  /// 道具单价（分），需与后台道具价格一致
+  goodsPrice  Int
+  /// 透传数据（发货推送原样返回；存 userId 用于发货兜底）
+  attach      String?
+  /// 环境标识（固定 0 = 现网）
+  env         Int       @default(0)
+  status      OrderStatus @default(CREATED)
+  paidAt      DateTime?
+  deliveredAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
+}
+
+enum OrderStatus {
+  CREATED
+  PAID
+  DELIVERED
 }
 
 enum BookStatus {
