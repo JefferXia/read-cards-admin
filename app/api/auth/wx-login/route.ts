@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { code2Session } from '@/lib/wx'
 import { setSessionCookie, randomNickname } from '@/lib/auth'
+import { INITIAL_CREDITS } from '@/lib/credits'
 
 export const runtime = 'nodejs'
 
@@ -26,6 +27,8 @@ export async function POST(req: Request) {
       openId: session.openid,
       nickname: randomNickname(),
       sessionKey: session.session_key ?? null,
+      // 初始赠送积分（每次 AI 生成扣 10 分；userId @unique 保证只发一次）
+      subscribeCredits: { create: { credits: INITIAL_CREDITS } },
     },
   })
   // 存量用户昵称兜底（早期建号未写入昵称，下次登录补上）

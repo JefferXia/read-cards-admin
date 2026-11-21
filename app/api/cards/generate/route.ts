@@ -3,6 +3,7 @@ import { currentUserId } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { generateCards } from '@/lib/cardgen'
 import { llmProvider } from '@/lib/llm'
+import { CARD_COST, deductCredits, ensureCredits, refundCredits } from '@/lib/credits'
 
 export const runtime = 'nodejs'
 /** LLM 调用最长 60s：Vercel Hobby 上限 60s，需在函数配置里显式声明 */
@@ -21,7 +22,10 @@ export const maxDuration = 60
  *
  * 卡数由 AI 按内容密度自行判断（1–10 张），端上不传/忽略卡数参数。
  *
- * 返回：{ cards: [{ id?, module, title, recast, quote }] }
+ * 积分闸门：每次生成预扣 CARD_COST 分（生成失败退款；余额行缺失惰性补初始赠送）。
+ * 非会员初始 30 分 = 3 次生成；会员月卡发货自动充值 1000 分。
+ *
+ * 返回：{ cards: [{ id?, module, title, recast, quote }] }；402 insufficient_credits = 积分不足
  */
 export async function POST(req: Request) {
   const userId = await currentUserId()
@@ -43,9 +47,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'llm_not_configured' }, { status: 503 })
   }
 
+  // 积分闸门：每次生成预扣 CARD_COST 分（余额不足 402 拦截；条件更新防并发透支）
+  await ensureCredits(userId)
+  if (!(await deductCredits(userId, CARD_COST))) {
+    return NextResponse.json({ error: 'insufficient_credits' }, { status: 402 })
+  }
+
   try {
     const report = await generateCards({ title, text })
     if (report.cards.length === 0) {
+      await refundCredits(userId, CARD_COST)
       return NextResponse.json({ error: 'generate_failed' }, { status: 502 })
     }
     // 自动入库：通过的卡全部落 UserCard。入库失败不吞掉生成结果——降级为不带回 id 返回
@@ -72,6 +83,7 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ cards })
   } catch (e) {
+    await refundCredits(userId, CARD_COST)
     console.error('[cards/generate]', e)
     return NextResponse.json({ error: 'generate_failed' }, { status: 502 })
   }

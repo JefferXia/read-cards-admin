@@ -18,6 +18,7 @@
  */
 import crypto from 'node:crypto'
 import { prisma } from './db'
+import { MEMBER_CREDITS, addCredits } from './credits'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 /** 会员月卡时长（天） */
@@ -97,6 +98,8 @@ export async function deliverMembership(userId: string): Promise<Date> {
     : new Date()
   const expiresAt = new Date(base.getTime() + MEMBERSHIP_DAYS * DAY_MS)
   await prisma.user.update({ where: { id: userId }, data: { membershipExpiresAt: expiresAt } })
+  // 充值积分：会员月卡发货自动 +1000（本函数只在真正发货路径调用一次，幂等性由 deliverOrder 条件更新保证）
+  await addCredits(userId, MEMBER_CREDITS)
   return expiresAt
 }
 

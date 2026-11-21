@@ -3,6 +3,7 @@ import { head, put } from '@vercel/blob'
 import { currentUserId } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { synthesize, ttsObjectKey, TTS_TEXT_MAX } from '@/lib/tts'
+import { isMember } from '@/lib/study'
 
 export const runtime = 'nodejs'
 /** 合成 + 转存最长 60s：Vercel Hobby 上限，需在函数配置里显式声明 */
@@ -16,6 +17,8 @@ export const maxDuration = 60
  *   （各只做一次查询）；缺省 = 先全局后自建级联（兼容旧调用方）。
  *   首次以卡的重构阐释（recast）合成 → 转存 Vercel Blob → 地址/时长回写
  *   Card/UserCard.audioUrl/audioMs；之后请求直读库返回，不再合成。
+ *   自建卡（kind='user' 或级联落到自建卡）首次合成为会员权益（403 member_required）；
+ *   已回写音频的回放、全局书卡、{ text } 即席合成不受限。
  * - { text }：任意文本即席合成（不做落库，仅按对象键去重）。
  *
  * 链路：t2a_v2（hex 回传音频）→ 服务端解码 → 转存 Vercel Blob → 返回自有长期 URL。
@@ -78,6 +81,17 @@ export async function POST(req: Request) {
       if (existing?.url) return NextResponse.json({ url: existing.url, durationMs: null, cached: true })
     } catch {
       /* 未命中，继续合成 */
+    }
+
+    // 自建卡音频生成：会员权益 —— 非会员 403（已缓存音频回放/全局书卡/即席文本不受限）
+    if (userCard) {
+      const u = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { membershipExpiresAt: true },
+      })
+      if (!isMember(u?.membershipExpiresAt, new Date())) {
+        return NextResponse.json({ error: 'member_required' }, { status: 403 })
+      }
     }
 
     const audio = await synthesize(text)
