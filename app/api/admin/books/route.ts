@@ -16,7 +16,8 @@ export async function GET() {
 
   const [books, approved] = await Promise.all([
     prisma.book.findMany({
-      orderBy: { slug: 'asc' },
+      // 与发现页一致：sortOrder 在前（0 = 未指定），书名兜底
+      orderBy: [{ sortOrder: 'asc' }, { title: 'asc' }],
       select: {
         id: true,
         slug: true,
@@ -24,6 +25,7 @@ export async function GET() {
         subtitle: true,
         author: true,
         status: true,
+        sortOrder: true,
         _count: { select: { chapters: true, cards: true } },
       },
     }),
@@ -38,6 +40,7 @@ export async function GET() {
       subtitle: b.subtitle,
       author: b.author,
       status: b.status,
+      sortOrder: b.sortOrder,
       chapterCount: b._count.chapters,
       cardCount: b._count.cards,
       approvedCount: approvedMap.get(b.id) ?? 0,
@@ -45,7 +48,7 @@ export async function GET() {
   })
 }
 
-/** PATCH /api/admin/books —— 编辑书状态（ACTIVE 全局唯一，切换时自动归档其它在学书） */
+/** PATCH /api/admin/books —— 编辑书状态（ACTIVE 全局唯一，切换时自动归档其它在学书）或批量调整发现页排序 */
 export async function PATCH(req: Request) {
   const denied = await guard()
   if (denied) return denied
@@ -53,7 +56,25 @@ export async function PATCH(req: Request) {
   const body = (await req.json().catch(() => null)) as {
     id?: string
     status?: 'DRAFT' | 'ACTIVE' | 'ARCHIVED'
+    orders?: { id: string; sortOrder: number }[]
   } | null
+
+  // 批量排序：客户端按目标顺序全量重编号（1..N），事务内一次写入
+  if (body?.orders) {
+    const orders = body.orders
+    if (
+      !Array.isArray(orders) ||
+      orders.length === 0 ||
+      orders.some((o) => !o?.id || !Number.isInteger(o.sortOrder))
+    ) {
+      return NextResponse.json({ error: 'bad_request' }, { status: 400 })
+    }
+    await prisma.$transaction(
+      orders.map((o) => prisma.book.update({ where: { id: o.id }, data: { sortOrder: o.sortOrder }, select: { id: true } })),
+    )
+    return NextResponse.json({ ok: true })
+  }
+
   if (!body?.id || !body.status) return NextResponse.json({ error: 'bad_request' }, { status: 400 })
 
   const book = await prisma.book.findUnique({ where: { id: body.id }, select: { id: true } })

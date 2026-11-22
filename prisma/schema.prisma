@@ -40,6 +40,7 @@ model Book {
   author   String
   tagline  String? // 一句话推荐语（今日书单卡展示）
   status   BookStatus @default(DRAFT)
+  sortOrder Int      @default(0) // 发现页排序（小在前；0 = 未指定，按书名兜底）
 
   chapters Chapter[]
   cards    Card[] // 直属卡（无章节卡：非公版书不透出章节）

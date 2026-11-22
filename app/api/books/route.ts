@@ -13,7 +13,8 @@ export async function GET() {
   const [books, counts] = await Promise.all([
     prisma.book.findMany({
       where: { status: { not: 'DRAFT' } },
-      orderBy: { title: 'asc' },
+      // sortOrder 由 admin 书单维护；0 = 未指定，按书名兜底
+      orderBy: [{ sortOrder: 'asc' }, { title: 'asc' }],
       select: {
         id: true,
         title: true,

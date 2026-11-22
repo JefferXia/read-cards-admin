@@ -26,7 +26,9 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import zhCN from 'antd/locale/zh_CN'
 import {
+  ArrowDownOutlined,
   ArrowLeftOutlined,
+  ArrowUpOutlined,
   BarChartOutlined,
   BookOutlined,
   CaretDownOutlined,
@@ -255,6 +257,7 @@ interface AdminBookRow {
   subtitle: string | null
   author: string
   status: AdminBook['status']
+  sortOrder: number
   chapterCount: number
   cardCount: number
   approvedCount: number
@@ -310,6 +313,29 @@ function CardsTab() {
     setBooks((bs) => (bs ? bs.map((b) => (b.id === id ? { ...b, status } : b)) : bs))
     setBook((bk) => (bk && bk.id === id ? { ...bk, status } : bk))
     reloadList()
+  }
+
+  /** 发现页排序：上移/下移（按全量书单重编号 1..N 一次性写库，乐观更新，失败回滚刷新） */
+  async function moveBook(id: string, dir: -1 | 1) {
+    if (!books) return
+    const idx = books.findIndex((b) => b.id === id)
+    const target = idx + dir
+    if (idx < 0 || target < 0 || target >= books.length) return
+    const next = [...books]
+    ;[next[idx], next[target]] = [next[target], next[idx]]
+    const ordered = next.map((b, i) => ({ ...b, sortOrder: i + 1 }))
+    setBooks(ordered)
+    try {
+      const r = await fetch('/api/admin/books', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orders: ordered.map((b) => ({ id: b.id, sortOrder: b.sortOrder })) }),
+      })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    } catch {
+      setBookError('排序保存失败，请重试')
+      reloadList()
+    }
   }
 
   const filtered = useMemo(() => {
@@ -373,6 +399,29 @@ function CardsTab() {
       render: (s: AdminBook['status'], r: AdminBookRow) => (
         <div onClick={(e) => e.stopPropagation()}>
           <StatusTagDropdown value={s} onChange={(v) => void changeBookStatus(r.id, v)} />
+        </div>
+      ),
+    },
+    {
+      // 发现页顺序：上移/下移即时保存（按全量书单重编号）
+      title: '排序',
+      width: 88,
+      render: (_: unknown, r: AdminBookRow) => (
+        <div onClick={(e) => e.stopPropagation()}>
+          <Space size={0}>
+            <Button
+              type="text"
+              size="small"
+              icon={<ArrowUpOutlined />}
+              onClick={() => void moveBook(r.id, -1)}
+            />
+            <Button
+              type="text"
+              size="small"
+              icon={<ArrowDownOutlined />}
+              onClick={() => void moveBook(r.id, 1)}
+            />
+          </Space>
         </div>
       ),
     },
