@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { head, put } from '@vercel/blob'
 import { currentUserId } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { invalidateBookCaches } from '@/lib/cache'
 import { synthesize, ttsObjectKey, TTS_TEXT_MAX } from '@/lib/tts'
 import { isMember } from '@/lib/study'
 
@@ -106,6 +107,7 @@ export async function POST(req: Request) {
         where: { id: card.id },
         data: { audioUrl: blob.url, audioMs: audio.durationMs },
       })
+      invalidateBookCaches() // admin:cards 缓存含 audioUrl，回写后失效
     } else if (userCard) {
       await prisma.userCard.update({
         where: { id: userCard.id },

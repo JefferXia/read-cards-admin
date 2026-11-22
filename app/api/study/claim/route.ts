@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { currentUserId } from '@/lib/auth'
 import { claimBook, dateKey } from '@/lib/study'
+import { invalidateUserCaches } from '@/lib/cache'
 
 export const runtime = 'nodejs'
 
@@ -41,6 +42,7 @@ export async function POST(req: Request) {
     )
   }
   await Promise.all(ops)
+  invalidateUserCaches(userId) // 念簿视图含 resolveBook（换书即变）
 
   return NextResponse.json({ ok: true, claimedToday: true })
 }

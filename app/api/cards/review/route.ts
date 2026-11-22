@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { currentUserId } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { initialDue } from '@/lib/study'
+import { invalidateUserCaches } from '@/lib/cache'
 
 export const runtime = 'nodejs'
 
@@ -38,5 +39,7 @@ export async function POST(req: Request) {
       phase: 'NEW',
     },
   })
+  invalidateUserCaches(userId) // 念簿只显示已入册的卡
+
   return NextResponse.json({ ok: true })
 }

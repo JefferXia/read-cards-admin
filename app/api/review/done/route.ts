@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { currentUserId } from '@/lib/auth'
 import { judgeAnswer } from '@/lib/judge'
 import { scheduleReview } from '@/lib/study'
+import { invalidateUserCaches } from '@/lib/cache'
 
 export const runtime = 'nodejs'
 
@@ -88,6 +89,7 @@ export async function POST(req: Request) {
       dueAt: next.dueAt,
     },
   })
+  invalidateUserCaches(userId) // 念簿展示 tier/score/reviewedAt
 
   return NextResponse.json({
     ok: true,

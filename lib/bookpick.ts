@@ -8,6 +8,7 @@
  */
 
 import { prisma } from './db'
+import { getOrSet } from './cache'
 import { chatJson, extractJson, llmProvider, type ChatMessage } from './llm'
 
 export interface CandidateBook {
@@ -30,26 +31,29 @@ type CandidateWithCards = CandidateBook & {
 
 async function loadCandidates(): Promise<CandidateWithCards[]> {
   // 至少有一张上架（APPROVED）卡的书才可推荐：没卡的推荐了也领不到卡
-  return prisma.book.findMany({
-    where: { cards: { some: { status: 'APPROVED' } } },
-    include: {
-      chapters: {
-        orderBy: { idx: 'asc' },
-        select: {
-          cards: {
-            where: { status: 'APPROVED' },
-            orderBy: { idx: 'asc' },
-            select: { title: true, definition: true },
+  // 全局候选书单（全部书+卡内容），重查询：缓存 5 分钟，admin 写卡后随统一失效
+  return getOrSet('bookpick:candidates', 5 * 60_000, () =>
+    prisma.book.findMany({
+      where: { cards: { some: { status: 'APPROVED' } } },
+      include: {
+        chapters: {
+          orderBy: { idx: 'asc' },
+          select: {
+            cards: {
+              where: { status: 'APPROVED' },
+              orderBy: { idx: 'asc' },
+              select: { title: true, definition: true },
+            },
           },
         },
+        cards: {
+          where: { chapterId: null, status: 'APPROVED' }, // 仅直属卡，避免与章节卡重复
+          orderBy: { sortOrder: 'asc' },
+          select: { title: true, definition: true },
+        },
       },
-      cards: {
-        where: { chapterId: null, status: 'APPROVED' }, // 仅直属卡，避免与章节卡重复
-        orderBy: { sortOrder: 'asc' },
-        select: { title: true, definition: true },
-      },
-    },
-  })
+    }),
+  )
 }
 
 function pickMessages(confusion: string, books: CandidateWithCards[]): ChatMessage[] {

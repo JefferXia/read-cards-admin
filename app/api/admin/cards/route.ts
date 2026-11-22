@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { isAdmin } from '@/lib/admin'
+import { getOrSet, invalidateBookCaches } from '@/lib/cache'
 
 export const runtime = 'nodejs'
 
@@ -17,18 +18,22 @@ export async function GET(req: Request) {
   const bookId = new URL(req.url).searchParams.get('bookId')
   if (!bookId) return NextResponse.json({ error: 'bad_request' }, { status: 400 })
 
-  const book = await prisma.book.findUnique({
-    where: { id: bookId },
-    include: {
-      chapters: {
-        orderBy: { idx: 'asc' },
-        include: { cards: { orderBy: { idx: 'asc' } } },
+  const data = await getOrSet(`admin:cards:${bookId}`, 5 * 60_000, async () => {
+    const book = await prisma.book.findUnique({
+      where: { id: bookId },
+      include: {
+        chapters: {
+          orderBy: { idx: 'asc' },
+          include: { cards: { orderBy: { idx: 'asc' } } },
+        },
+        cards: { where: { chapterId: null }, orderBy: { sortOrder: 'asc' } }, // 仅直属卡（无章节卡）
       },
-      cards: { where: { chapterId: null }, orderBy: { sortOrder: 'asc' } }, // 仅直属卡（无章节卡）
-    },
+    })
+    if (!book) return undefined // not found 不缓存
+    return { book }
   })
-  if (!book) return NextResponse.json({ error: 'not_found' }, { status: 404 })
-  return NextResponse.json({ book })
+  if (!data) return NextResponse.json({ error: 'not_found' }, { status: 404 })
+  return NextResponse.json(data)
 }
 
 /** POST /api/admin/cards —— 新建卡片（草稿）；挂载点二选一：chapterId（章节卡）或 bookId（直属卡） */
@@ -101,6 +106,7 @@ export async function POST(req: Request) {
       status: 'DRAFT',
     },
   })
+  invalidateBookCaches()
   return NextResponse.json({ card })
 }
 
@@ -136,6 +142,7 @@ export async function PATCH(req: Request) {
   if (body.status !== undefined) data.status = body.status
 
   const card = await prisma.card.update({ where: { id: body.id }, data })
+  invalidateBookCaches()
   return NextResponse.json({ card })
 }
 
@@ -152,5 +159,6 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: 'card_in_use' }, { status: 409 })
   }
   await prisma.card.delete({ where: { id } })
+  invalidateBookCaches()
   return NextResponse.json({ ok: true })
 }

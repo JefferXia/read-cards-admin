@@ -1,4 +1,5 @@
 import { prisma } from './db'
+import { getOrSet, onInvalidateBooks } from './cache'
 import type { Prisma } from '@prisma/client'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -80,6 +81,8 @@ export type BookWithChapters = Prisma.BookGetPayload<{ include: { chapters: true
  */
 const BOOK_CACHE_TTL = 60_000
 const bookCache = new Map<string, { at: number; book: BookWithChapters }>()
+// admin 切换活跃书/改书后与统一失效联动（否则 activeBook 最长 60s 返回旧书）
+onInvalidateBooks(() => bookCache.clear())
 
 async function cachedBook(key: string, load: () => Promise<BookWithChapters | null>) {
   const hit = bookCache.get(key)
@@ -100,6 +103,25 @@ export function activeBook() {
 export function getBookWithChapters(bookId: string) {
   return cachedBook(bookId, () =>
     prisma.book.findUnique({ where: { id: bookId }, include: { chapters: true } }),
+  )
+}
+
+/** 本书全部 APPROVED 卡的全量视图（缓存单元：卡内容对所有用户一致，仅已学标记因人而异） */
+export type BookCards = Prisma.CardGetPayload<{ include: { chapter: { select: { title: true } } } }>[]
+
+/**
+ * 本书全部 APPROVED 卡（进程内缓存 5 分钟，key book:cards:<bookId>）：
+ * bookDeck / todayPlan 共用。卡内容重（quote/recast/trigger/边界），用户个人
+ * 只差一组 cardId 集合，故全局卡列表按书缓存，个人 state 每次现查再合并。
+ * admin 卡写操作后由 invalidateBookCaches() 整体失效（含本键）。
+ */
+export function bookCards(bookId: string) {
+  return getOrSet(`book:cards:${bookId}`, 5 * 60_000, async (): Promise<BookCards> =>
+    prisma.card.findMany({
+      where: { bookId, status: 'APPROVED' },
+      orderBy: { sortOrder: 'asc' }, // 数据源 JSON 顺序（入库序），与章节无关
+      include: { chapter: { select: { title: true } } },
+    }),
   )
 }
 
@@ -163,11 +185,7 @@ export async function todayPlan(userId: string, bookId: string, member = false) 
       where: { userId, card: { bookId } },
       select: { cardId: true, createdAt: true },
     }),
-    prisma.card.findMany({
-      where: { bookId, status: 'APPROVED' },
-      orderBy: { sortOrder: 'asc' }, // 数据源 JSON 顺序（入库序），与章节无关
-      include: { chapter: { select: { title: true } } },
-    }),
+    bookCards(bookId), // 全局卡列表命中缓存（个人 state 现查）
   ])
   const learnedAt = new Map(states.map((s) => [s.cardId, s.createdAt]))
 
@@ -213,10 +231,7 @@ export async function bookDeck(userId: string, bookId: string) {
       where: { userId, card: { bookId } },
       select: { cardId: true },
     }),
-    prisma.card.findMany({
-      where: { bookId, status: 'APPROVED' },
-      orderBy: { sortOrder: 'asc' }, // 数据源 JSON 顺序（入库序），与章节无关
-    }),
+    bookCards(bookId), // 全局卡列表命中缓存（个人 state 现查）
   ])
   const learned = new Set(states.map((s) => s.cardId))
 

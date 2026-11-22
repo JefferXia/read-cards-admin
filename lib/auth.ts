@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import { cookies } from 'next/headers'
 import { prisma } from './db'
+import { getOrSet } from './cache'
 
 const COOKIE = 'yr_session'
 const SECRET = () => process.env.SESSION_SECRET ?? 'dev-secret'
@@ -36,15 +37,21 @@ export async function setSessionCookie(userId: string) {
   })
 }
 
-/** 路由守卫：返回 userId 或 null（由调用方决定 401） */
+/**
+ * 路由守卫：返回 userId 或 null（由调用方决定 401）。
+ * token 已 HMAC 验签，库里只查「用户仍存在」——每个 API 请求都会走这里，
+ * 缓存 60s 省一次跨区 RTT（删除用户仅脚本行为，短暂残留可接受）。
+ */
 export async function currentUserId(): Promise<string | null> {
   const jar = await cookies()
   const token = jar.get(COOKIE)?.value
   if (!token) return null
   const userId = verifyToken(token)
   if (!userId) return null
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } })
-  return user?.id ?? null
+  return getOrSet(`auth:user:${userId}`, 60_000, async () => {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } })
+    return user?.id ?? null
+  })
 }
 
 /** 登录建号默认昵称：书友 + 4 位随机数（仅展示，不要求唯一） */

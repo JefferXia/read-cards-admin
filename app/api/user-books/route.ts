@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { currentUserId } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { getOrSet, invalidateUserCaches } from '@/lib/cache'
 
 export const runtime = 'nodejs'
 
@@ -41,25 +42,28 @@ export async function GET() {
   const userId = await currentUserId()
   if (!userId) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
-  const rows = await prisma.userBook.findMany({
-    where: { userId },
-    orderBy: { updatedAt: 'desc' },
-    include: {
-      book: { select: { id: true, title: true, subtitle: true, author: true, tagline: true } },
-    },
+  // 个人卡包：仅 UserBook 写点（导入/移除/领取）会变化，按用户缓存 5 分钟
+  const books = await getOrSet(`user:${userId}:books`, 5 * 60_000, async () => {
+    const rows = await prisma.userBook.findMany({
+      where: { userId },
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        book: { select: { id: true, title: true, subtitle: true, author: true, tagline: true } },
+      },
+    })
+    // 全书 APPROVED 卡数（一次 groupBy，避免 N+1）
+    const bookIds = rows.map((r) => r.bookId)
+    const counts = bookIds.length
+      ? await prisma.card.groupBy({
+          by: ['bookId'],
+          where: { bookId: { in: bookIds }, status: 'APPROVED' },
+          _count: true,
+        })
+      : []
+    const countMap = new Map(counts.map((c) => [c.bookId, c._count]))
+    return rows.map((r) => toApi(r, countMap.get(r.bookId) ?? 0))
   })
-  // 全书 APPROVED 卡数（一次 groupBy，避免 N+1）
-  const bookIds = rows.map((r) => r.bookId)
-  const counts = bookIds.length
-    ? await prisma.card.groupBy({
-        by: ['bookId'],
-        where: { bookId: { in: bookIds }, status: 'APPROVED' },
-        _count: true,
-      })
-    : []
-  const countMap = new Map(counts.map((c) => [c.bookId, c._count]))
-
-  return NextResponse.json({ books: rows.map((r) => toApi(r, countMap.get(r.bookId) ?? 0)) })
+  return NextResponse.json({ books })
 }
 
 export async function POST(req: Request) {
@@ -80,6 +84,7 @@ export async function POST(req: Request) {
   if (existing) return NextResponse.json({ ok: true, already: true })
 
   await prisma.userBook.create({ data: { userId, bookId } })
+  invalidateUserCaches(userId)
   return NextResponse.json({ ok: true, already: false })
 }
 
@@ -94,5 +99,6 @@ export async function DELETE(req: Request) {
   if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
   await prisma.userBook.delete({ where: { id } })
+  invalidateUserCaches(userId)
   return NextResponse.json({ ok: true })
 }
